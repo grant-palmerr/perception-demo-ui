@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perception Demo</title>
+  <style>
+    :root {
+      --bg-page: #1e1e24;
+      --bg-panel: #2a2a32;
+      --bg-header: #25252d;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --text-primary: #e8e8ed;
+      --text-muted: #9898a6;
+      --accent: #3d9cfd;
+      --label-bg: #0d0d10;
+      --label-text: #7cfc9a;
+      --radius: 10px;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-page);
+      color: var(--text-primary);
+      line-height: 1.45;
+    }
+
+    .app {
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 1.25rem 1.5rem 2rem;
+    }
+
+    #status-header {
+      background: var(--bg-header);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      padding: 0.75rem 1rem;
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      box-shadow: var(--shadow);
+      margin-bottom: 1.25rem;
+      border-left: 3px solid transparent;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    #status-header[data-status="connected"] {
+      border-left-color: #2ecc71;
+      background: linear-gradient(90deg, rgba(46, 204, 113, 0.12) 0%, var(--bg-header) 40%);
+    }
+
+    #status-header[data-status="connecting"] {
+      border-left-color: var(--accent);
+    }
+
+    #status-header[data-status="error"] {
+      border-left-color: #e74c3c;
+      background: linear-gradient(90deg, rgba(231, 76, 60, 0.1) 0%, var(--bg-header) 40%);
+    }
+
+    /* Local JSON playback (?playback=1) — no WebSocket */
+    #status-header[data-status="playback"] {
+      border-left-color: #9b59b6;
+      background: linear-gradient(90deg, rgba(155, 89, 182, 0.12) 0%, var(--bg-header) 40%);
+    }
+
+    #status-header .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: baseline;
+      gap: 0.5rem 1rem;
+    }
+
+    #status-header .kv strong {
+      color: var(--text-muted);
+      font-weight: 600;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    #status-header .val {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    #status-header .url {
+      font-size: 0.75rem;
+      opacity: 0.85;
+      word-break: break-all;
+    }
+
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem 1.25rem;
+      margin-bottom: 1rem;
+      padding: 0.65rem 1rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .controls-bar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      color: var(--text-primary);
+      user-select: none;
+    }
+
+    .controls-bar input[type="checkbox"] {
+      width: 1.1rem;
+      height: 1.1rem;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .controls-bar .controls-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin: 0;
+    }
+
+    .controls-bar .controls-hint code {
+      font-size: 0.7rem;
+      background: var(--label-bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .viewer-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin: 0 0 0.75rem;
+    }
+
+    #viewer {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1rem;
+    }
+
+    @media (max-width: 900px) {
+      #viewer {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 520px) {
+      #viewer {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .camera-slot {
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+    }
+
+    .camera-frame {
+      position: relative;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      box-shadow: var(--shadow);
+      aspect-ratio: 4 / 3;
+    }
+
+    .camera-frame img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .camera-frame canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+
+    .camera-label {
+      display: block;
+      text-align: center;
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+      font-size: 0.75rem;
+      color: var(--label-text);
+      background: var(--label-bg);
+      padding: 0.35rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header id="status-header">Connection: disconnected</header>
+    <div class="controls-bar" role="group" aria-label="Display options">
+      <label for="toggle-detections">
+        <input type="checkbox" id="toggle-detections" checked />
+        Show object detection (bounding boxes)
+      </label>
+      <p class="controls-hint">Turn off to hide overlays; images stay visible.</p>
+      <!-- Offline playback hint (restore if needed):
+      <p class="controls-hint">Offline sample playback (no WebSocket): add <code>?playback=1</code> to the URL — requires <code>python3 -m http.server</code> (not opening the file directly).</p>
+      -->
+    </div>
+    <p class="viewer-title">Camera views</p>
+    <div id="viewer">
+      <div class="camera-slot" data-camera="front_left">
+        <div class="camera-frame">
+          <img alt="Front left camera" />
+          <canvas></canvas>
+        </div>
+        <span class="camera-label">front_left</span>
+      </div>
+      <div class="camera-slot" data-camera="front">
+        <div class="camera-frame">
+          <img alt="Front camera" />
+          <canvas></canvas>
+        </div>
+        <span class="camera-label">front</span>
+      </div>
+      <div class="camera-slot" data-camera="front_right">
+        <div class="camera-frame">
+          <img alt="Front right camera" />
+          <canvas></canvas>
+        </div>
+        <span class="camera-label">front_right</span>
+      </div>
+      <div class="camera-slot" data-camera="back_left">
+        <div class="camera-frame">
+          <img alt="Back left camera" />
+          <canvas></canvas>
+        </div>
+        <span class="camera-label">back_left</span>
+      </div>
+      <div class="camera-slot" data-camera="back">
+        <div class="camera-frame">
+          <img alt="Back camera" />
+          <canvas></canvas>
+        </div>
+        <span class="camera-label">back</span>
+      </div>
+      <div class="camera-slot" data-camera="back_right">
+        <div class="camera-frame">
+          <img alt="Back right camera" />
+          <canvas></canvas>
+        </div>
+        <span class="camera-label">back_right</span>
+      </div>
+    </div>
+  </div>
+  <script src="main.js"></script>
+</body>
+</html>
