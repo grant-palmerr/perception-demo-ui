@@ -1,50 +1,50 @@
 # Perception demo UI
 
-Vanilla **HTML / CSS / JS**: six camera tiles (placeholders) with optional detection overlays. **`CAM_FRONT_sample.json`** in this folder is used for **offline playback** on the **front** camera only.
+Little **HTML/CSS/JS** thing for class — six fake camera tiles, green boxes when we have detections. The **`CAM_FRONT_sample.json`** in the repo is only for **offline playback** on the **front** cam.
 
 ---
 
-## Run with the bundled `CAM_FRONT_sample.json`
+## Run it with the sample json
 
-1. **Open a terminal** in your editor (**Terminal → New Terminal** in VS Code/Cursor) or **Terminal.app** on macOS.
+1. **Open a terminal** (Cursor/VS Code terminal is fine, or Terminal.app).
 
-2. **Go to this project folder** (change the path if yours differs):
+2. **cd into the repo:**
    ```bash
    cd ~/Desktop/perception-demo-ui
    ```
-   Run `ls` and confirm **`CAM_FRONT_sample.json`** is listed.
+   Run `ls` and make sure **`CAM_FRONT_sample.json`** is there.
 
-3. **Start a local web server:**
+3. **Tiny http server** (Python is already on Macs usually):
    ```bash
    python3 -m http.server 8080
    ```
-   Keep this window open. Stop with **Ctrl+C** when done.
+   Leave it running. Ctrl+C to stop.
 
-4. **In your browser**, open:
+4. **Browser:**
    ```
    http://127.0.0.1:8080/?playback=1
    ```
-   **`?playback=1`** loads `CAM_FRONT_sample.json` and steps through frames. No WebSocket or SSH tunnel needed.
+   The **`?playback=1`** bit matters — that’s what loads the json and flips through frames. No ssh tunnel needed for this.
 
-5. On the page, use **“Show object detection”** to toggle boxes. Only the **front** tile uses this JSON; other cameras stay placeholders.
+5. Uncheck **“Show object detection”** if you just want the placeholders. Only **front** gets real tracks from this file right now.
 
-**Note:** Don’t open `index.html` via **File → Open** for playback—a `file://` URL usually breaks **`fetch`**. Use steps 3–4.
-
----
-
-## Requirements
-
-- **Python 3**
-- Same folder: `index.html`, `main.js`, `CAM_FRONT_sample.json`
+**Don’t** open `index.html` straight from Finder for playback — **`fetch` dies on file://** most of the time.
 
 ---
 
-## Optional: live WebSocket
+## What you need
 
-Use **`http://127.0.0.1:8080/`** (no `?playback`) when the backend is running. The UI uses **`ws://127.0.0.1:8001/tracking`** by default (often with an SSH tunnel). That’s separate from JSON playback.
+- Python 3  
+- These files together: `index.html`, `main.js`, `CAM_FRONT_sample.json`
 
 ---
 
-## Notes
+## Live WebSocket mode (optional)
 
-- **Front** box coordinates are scaled from **1600×900** annotation space to the image on screen; adjust **`ANNOTATION_SIZE_BY_CAMERA`** in `main.js` if your data uses a different size.
+`http://127.0.0.1:8080/` **without** `?playback` — talks to **`ws://127.0.0.1:8001/tracking`** (tunnel + backend situation). Different from the json playback thing.
+
+---
+
+## Random note
+
+Front camera boxes get scaled from **1600×900** idea into whatever image size we show — mess with **`ANNOTATION_SIZE_BY_CAMERA`** in `main.js` if your data isn’t nuScenes-shaped.

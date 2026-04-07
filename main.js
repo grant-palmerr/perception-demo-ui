@@ -1,12 +1,9 @@
-/**
- * Perception demo – Step 1: WebSocket connection and message handling.
- * Step 2 will add drawing/canvas in #viewer.
- */
+// Perception demo UI — mostly WebSocket stuff + drawing boxes on the cameras
 
-// WebSocket endpoint for this demo (adjust as needed).
+// change this if your tunnel / port is different
 const WEBSOCKET_URL = "ws://127.0.0.1:8001/tracking";
 
-/** Local sample playback: open with ?playback=1 (served via http.server, not file://). */
+// ?playback=1 loads this file; needs a real http server or fetch breaks
 const SAMPLE_JSON_PATH = "CAM_FRONT_sample.json";
 const PLAYBACK_INTERVAL_MS = 150;
 
@@ -17,16 +14,13 @@ function getPlaybackModeFromUrl() {
 
 const IS_PLAYBACK_MODE = getPlaybackModeFromUrl();
 
-/**
- * class_id → label. Sync with tracking_pipeline.py on the board when known.
- * Sample data uses 0, 1, … — adjust names as needed.
- */
+// maps class ids to strings — pull from tracking_pipeline.py on the board when we know the real list
 const CLASS_NAMES = [
   "car",
   "pedestrian"
 ];
 
-/** Playback-only: frame list + timer (WebSocket not used). */
+// used when you're in playback mode (no socket)
 const playbackState = {
   frames: null,
   totalFrames: 0,
@@ -35,8 +29,7 @@ const playbackState = {
   frameLabel: "—"
 };
 
-// Static camera images. Email URLs returned 404; using placeholders until correct URLs are provided.
-// Original email URLs (for reference): smuseniordesign.blob.core.windows.net/nuimages/CAM FRONT/...
+// placeholder pics for now — the old azure links from email 404'd lol
 const CAMERA_IMAGES = {
   front: "https://placehold.co/640x480/2a2a32/b8b8c8?text=front",
   front_left: "https://placehold.co/640x480/2a2a32/b8b8c8?text=front_left",
@@ -46,19 +39,13 @@ const CAMERA_IMAGES = {
   back_right: "https://placehold.co/640x480/2a2a32/b8b8c8?text=back_right"
 };
 
-/**
- * Pixel space of bounding_box data from the tracker / dataset (before display).
- * nuScenes CAM_FRONT images are 1600×900 — matches CAM_FRONT_sample.json tracks.
- * Scale: canvas_coord = annotation_coord * (canvasSize / annotationSize).
- * Omit a camera (or use w/h 0) to draw boxes 1:1 with the loaded image (e.g. mock WebSocket in image space).
- */
+// json boxes are in "full cam" pixels (nuScenes front = 1600x900). we squish them down to match whatever img we're showing.
+// delete a camera here if the backend already sends coords in screen space / dummy data
 const ANNOTATION_SIZE_BY_CAMERA = {
   front: { w: 1600, h: 900 }
 };
 
-/**
- * @returns {{ sx: number, sy: number }}
- */
+// how much to scale x and y so boxes line up with the image
 function getAnnotationScale(cameraId, canvasW, canvasH) {
   const ref = ANNOTATION_SIZE_BY_CAMERA[cameraId];
   if (!ref || !ref.w || !ref.h || ref.w <= 0 || ref.h <= 0) {
@@ -68,15 +55,16 @@ function getAnnotationScale(cameraId, canvasW, canvasH) {
 }
 
 const appState = {
-  connectionStatus: "disconnected", // "disconnected" | "connecting" | "connected" | "error"
-  lastMessage: null,                // object | null
-  lastMessageReceivedAt: null,      // timestamp number | null
-  messageCount: 0,                  // number of valid messages received
-  showDetections: true               // when false, hide bounding boxes and labels
+  connectionStatus: "disconnected",
+  lastMessage: null,
+  lastMessageReceivedAt: null,
+  messageCount: 0,
+  showDetections: true // unchecked = hide overlays only
 };
 
 const statusHeader = document.getElementById("status-header");
 
+// websocket can send an array or { detections: [...] } — normalize it
 function getDetections(msg) {
   if (!msg) return [];
   if (Array.isArray(msg) && msg.length > 0 && typeof msg[0] === "object" && "bounding_box" in (msg[0] ?? {})) {
@@ -86,9 +74,7 @@ function getDetections(msg) {
   return msg.detections ?? msg.objects ?? msg.boxes ?? [];
 }
 
-/**
- * Map metadata.camera (e.g. CAM_FRONT) to UI dataset.camera ids (e.g. front).
- */
+// CAM_FRONT -> front, etc. so it matches the html data-camera attrs
 function cameraIdFromMetadata(camera) {
   const key = String(camera || "")
     .toUpperCase()
@@ -105,9 +91,7 @@ function cameraIdFromMetadata(camera) {
   return map[key] || "front";
 }
 
-/**
- * One frame from CAM_FRONT_sample.json → detections array for renderViewer.
- */
+// turns one json frame into the shape renderViewer already likes
 function frameToDetections(frame) {
   const meta = frame && frame.metadata ? frame.metadata : {};
   const cam = cameraIdFromMetadata(meta.camera);
@@ -140,6 +124,7 @@ function frameToDetections(frame) {
   return out;
 }
 
+// draw one box; sx/sy shrink coords from annotation space to canvas
 function drawBoundingBox(ctx, d, sx, sy) {
   const scaleX = sx != null && sx > 0 ? sx : 1;
   const scaleY = sy != null && sy > 0 ? sy : 1;
@@ -163,6 +148,7 @@ function drawBoundingBox(ctx, d, sx, sy) {
   }
 }
 
+// slap detections on every camera tile (most will be empty unless we have data for them)
 function renderViewer(message) {
   if (!message) return;
   const detections = getDetections(message);
@@ -202,6 +188,7 @@ function renderViewer(message) {
   });
 }
 
+// top status bar text / colors
 function updateStatusUI() {
   if (!statusHeader) return;
 
@@ -263,10 +250,6 @@ function updateStatusUI() {
     "</span>";
 }
 
-/**
- * Connect to the WebSocket.
- * Uses the global WEBSOCKET_URL constant.
- */
 function connectWebSocket() {
   appState.connectionStatus = "connecting";
   updateStatusUI();
@@ -311,6 +294,7 @@ function connectWebSocket() {
   };
 }
 
+// next frame in playback mode
 function playbackTick() {
   const frames = playbackState.frames;
   if (!frames || frames.length === 0) return;
@@ -329,9 +313,7 @@ function playbackTick() {
   playbackState.frameIndex = (i + 1) % playbackState.totalFrames;
 }
 
-/**
- * Option A: load CAM_FRONT_sample.json and advance frames on a timer (no WebSocket).
- */
+// fake a "live" stream by reading the sample file and stepping frames on a timer
 async function startSamplePlayback() {
   appState.connectionStatus = "connecting";
   appState.messageCount = 0;
@@ -363,6 +345,7 @@ async function startSamplePlayback() {
   }
 }
 
+// checkbox at the top
 function setupDetectionToggle() {
   const toggle = document.getElementById("toggle-detections");
   if (!toggle) return;
@@ -377,6 +360,7 @@ function setupDetectionToggle() {
 
 setupDetectionToggle();
 
+// url decides which path we use
 if (IS_PLAYBACK_MODE) {
   startSamplePlayback();
 } else {

@@ -65,7 +65,7 @@
       background: linear-gradient(90deg, rgba(231, 76, 60, 0.1) 0%, var(--bg-header) 40%);
     }
 
-    /* Local JSON playback (?playback=1) — no WebSocket */
+    /* purple bar = watching the json file, not the socket */
     #status-header[data-status="playback"] {
       border-left-color: #9b59b6;
       background: linear-gradient(90deg, rgba(155, 89, 182, 0.12) 0%, var(--bg-header) 40%);
@@ -221,8 +221,8 @@
         Show object detection (bounding boxes)
       </label>
       <p class="controls-hint">Turn off to hide overlays; images stay visible.</p>
-      <!-- Offline playback hint (restore if needed):
-      <p class="controls-hint">Offline sample playback (no WebSocket): add <code>?playback=1</code> to the URL — requires <code>python3 -m http.server</code> (not opening the file directly).</p>
+      <!-- had a longer hint here about ?playback=1 — uncomment if we want it back on the page
+      <p class="controls-hint">...</p>
       -->
     </div>
     <p class="viewer-title">Camera views</p>
