@@ -105,6 +105,14 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
       align-items:center;
       justify-content:center;
     }
+    .video-frame canvas{
+      position:absolute;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      pointer-events:none;
+    }
 
     @supports (width: min(100%, 376px)) {
       .video-frame{
@@ -209,6 +217,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
           <div class="video-tile" data-slot="0">
             <div class="video-frame">
               <img id="vid0" alt="Feed 1" />
+              <canvas id="overlay0"></canvas>
               <div class="placeholder">Pending feed.</div>
             </div>
             <div class="feed-label" id="label0">Feed 1</div>
@@ -217,6 +226,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
           <div class="video-tile" data-slot="1">
             <div class="video-frame">
               <img id="vid1" alt="Feed 2" />
+              <canvas id="overlay1"></canvas>
               <div class="placeholder">Pending feed.</div>
             </div>
             <div class="feed-label" id="label1">Feed 2</div>
@@ -225,6 +235,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
           <div class="video-tile" data-slot="2">
             <div class="video-frame">
               <img id="vid2" alt="Feed 3" />
+              <canvas id="overlay2"></canvas>
               <div class="placeholder">Pending feed.</div>
             </div>
             <div class="feed-label" id="label2">Feed 3</div>
@@ -233,6 +244,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
           <div class="video-tile" data-slot="3">
             <div class="video-frame">
               <img id="vid3" alt="Feed 4" />
+              <canvas id="overlay3"></canvas>
               <div class="placeholder">Pending feed.</div>
             </div>
             <div class="feed-label" id="label3">Feed 4</div>
@@ -241,6 +253,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
           <div class="video-tile" data-slot="4">
             <div class="video-frame">
               <img id="vid4" alt="Feed 5" />
+              <canvas id="overlay4"></canvas>
               <div class="placeholder">Pending feed.</div>
             </div>
             <div class="feed-label" id="label4">Feed 5</div>
@@ -249,6 +262,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
           <div class="video-tile" data-slot="5">
             <div class="video-frame">
               <img id="vid5" alt="Feed 6" />
+              <canvas id="overlay5"></canvas>
               <div class="placeholder">Pending feed.</div>
             </div>
             <div class="feed-label" id="label5">Feed 6</div>
@@ -299,10 +313,170 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
   const objBody = document.getElementById("objBody");
   const emptyRow = document.getElementById("emptyRow");
 
+  const SLOT_BY_CAMERA = {
+  front_left: 0,
+  front: 1,
+  front_right: 2,
+  back_left: 3,
+  back: 4,
+  back_right: 5
+};
+
+const CAMERA_BY_SLOT = {
+  0: "front_left",
+  1: "front",
+  2: "front_right",
+  3: "back_left",
+  4: "back",
+  5: "back_right"
+};
+
+const CLASS_NAMES = [
+  "car",
+  "pedestrian"
+];
+
+const ANNOTATION_SIZE_BY_CAMERA = {
+  front: { w: 1600, h: 900 }
+};
+
+function getAnnotationScale(cameraId, canvasW, canvasH) {
+  const ref = ANNOTATION_SIZE_BY_CAMERA[cameraId];
+  if (!ref || !ref.w || !ref.h) return { sx: 1, sy: 1 };
+  return { sx: canvasW / ref.w, sy: canvasH / ref.h };
+}
+
+function cameraIdFromMetadata(camera) {
+  const key = String(camera || "")
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+    .replace(/^CAM_/, "");
+
+  const map = {
+    FRONT: "front",
+    FRONT_LEFT: "front_left",
+    FRONT_RIGHT: "front_right",
+    BACK: "back",
+    BACK_LEFT: "back_left",
+    BACK_RIGHT: "back_right"
+  };
+
+  return map[key] || "front";
+}
+
+function frameToDetections(frame) {
+  const meta = frame?.metadata || {};
+  const cam = cameraIdFromMetadata(meta.camera);
+  const tracks = frame?.tracks || {};
+  const out = [];
+
+  for (const [trackId, arr] of Object.entries(tracks)) {
+    if (!Array.isArray(arr) || arr.length < 6) continue;
+
+    const [x1, y1, x2, y2, conf, classIdRaw] = arr;
+    const classId = Math.floor(Number(classIdRaw));
+    const objectClass = CLASS_NAMES[classId] ?? `class_${classId}`;
+
+    out.push({
+      camera_id: cam,
+      object_class: objectClass,
+      bounding_box: [
+        [Number(x1), Number(y1)],
+        [Number(x2), Number(y1)],
+        [Number(x2), Number(y2)],
+        [Number(x1), Number(y2)]
+      ],
+      track_id: trackId,
+      confidence: Number(conf)
+    });
+  }
+
+  return out;
+}
+
+  function drawBoundingBox(ctx, d, sx, sy) {
+    const bbox = d.bounding_box;
+    if (!Array.isArray(bbox) || bbox.length < 4) return;
+
+    const pts = bbox.map(([x, y]) => [x * sx, y * sy]);
+    const label = getDetectionLabel(d);
+    const isHovered = hoveredObjectLabel === label;
+
+    ctx.strokeStyle = isHovered ? "yellow" : "lime";
+    ctx.lineWidth = isHovered ? 3 : 2;
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = isHovered ? "yellow" : "lime";
+    ctx.font = "12px sans-serif";
+    ctx.fillText(label, pts[0][0], Math.max(12, pts[0][1] - 4));
+  }
+
+  function clearOverlay(slotIndex) {
+    const canvas = document.getElementById(`overlay${slotIndex}`);
+    const img = document.getElementById(`vid${slotIndex}`);
+    if (!canvas || !img || !img.naturalWidth) return;
+
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function renderDetectionsForCamera(cameraId, detections) {
+    const slotIndex = SLOT_BY_CAMERA[cameraId];
+    if (slotIndex == null) return;
+
+    const img = document.getElementById(`vid${slotIndex}`);
+    const canvas = document.getElementById(`overlay${slotIndex}`);
+    if (!img || !canvas || !img.naturalWidth) return;
+
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const { sx, sy } = getAnnotationScale(cameraId, canvas.width, canvas.height);
+
+    ctx.lineWidth = Math.max(1, Math.min(2, 2 * Math.min(sx, sy)));
+
+    for (const d of detections) {
+      drawBoundingBox(ctx, d, sx, sy);
+    }
+  }
+
+  function renderAllDetections(detections) {
+    for (let i = 0; i < 6; i++) clearOverlay(i);
+
+    const byCamera = new Map();
+    for (const d of detections) {
+      const cam = (d.camera_id || "").toLowerCase().replace(/\s/g, "_");
+      if (!byCamera.has(cam)) byCamera.set(cam, []);
+      byCamera.get(cam).push(d);
+    }
+
+    for (const [cameraId, cameraDetections] of byCamera.entries()) {
+      renderDetectionsForCamera(cameraId, cameraDetections);
+    }
+  }
+
   const objectRows = new Map();
 
   function ensureEmptyRemoved(){
     if (emptyRow) emptyRow.remove();
+  }
+  
+  function getAllLatestDetections() {
+    const all = [];
+    for (const dets of latestDetectionsByCamera.values()) {
+      all.push(...dets);
+    }
+    return all;
   }
 
   function upsertObjectRisk(objectName, riskValue){
@@ -314,6 +488,18 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
     let tr = objectRows.get(name);
     if (!tr){
       tr = document.createElement("tr");
+      tr.dataset.objectLabel = name;
+
+      tr.addEventListener("mouseenter", () => {
+        hoveredObjectLabel = name;
+        renderAllDetections(getAllLatestDetections());
+      });
+
+      tr.addEventListener("mouseleave", () => {
+        hoveredObjectLabel = null;
+        renderAllDetections(getAllLatestDetections());
+      });
+
       const tdObj = document.createElement("td");
       const tdRisk = document.createElement("td");
       tdObj.textContent = name;
@@ -327,11 +513,67 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
       tr.appendChild(tdRisk);
 
       objectRows.set(name, tr);
-      objBody.prepend(tr);
+      objBody.appendChild(tr);
     } else {
       const pill = tr.querySelector(".risk-pill");
       if (pill) pill.textContent = risk;
-      objBody.prepend(tr);
+      objBody.appendChild(tr);
+    }
+  }
+
+  function clearObjectRiskTable() {
+    objectRows.clear();
+    objBody.innerHTML = "";
+  }
+
+  function confidenceToRisk(confidence) {
+    const c = Number(confidence) || 0;
+
+    if (c >= 0.75) return "high";
+    if (c >= 0.5) return "medium";
+    return "low";
+  }
+
+  function getDetectionLabel(d) {
+    return d.track_id
+      ? `${d.object_class} #${d.track_id}`
+      : (d.object_class || "unknown");
+  }
+
+  function refreshRiskTableFromDetections(detections) {
+    clearObjectRiskTable();
+
+    if (!detections || detections.length === 0) {
+      objBody.innerHTML = `
+        <tr id="emptyRow">
+          <td colspan="2" style="color:#aab1c3;">No detected objects.</td>
+        </tr>
+      `;
+      return;
+    }
+
+    const sorted = detections
+      .map(d => {
+        const conf = Number(d.confidence) || 0;
+        return {
+          ...d,
+          confidence: conf,
+          riskLevel: confidenceToRisk(conf)
+        };
+      })
+      .sort((a, b) => {
+        const order = { high: 1, medium: 2, low: 3 };
+
+        const riskDiff = (order[a.riskLevel] || 999) - (order[b.riskLevel] || 999);
+        if (riskDiff !== 0) return riskDiff;
+
+        return b.confidence - a.confidence;
+      });
+
+    for (const d of sorted) {
+      const label = getDetectionLabel(d);
+      const riskLabel = `${d.riskLevel} (${d.confidence.toFixed(2)})`;
+      upsertObjectRisk(label, riskLabel);
     }
   }
 
@@ -359,12 +601,30 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
     if (media) media.style.display = "block";
   }
 
+  const latestDetectionsByCamera = new Map();
   function renderBase64Frame(slotIndex, base64Data, mimeType = "image/jpeg"){
     const img = document.getElementById(`vid${slotIndex}`);
     if (!img) return;
 
+    img.onload = () => {
+      showVideoElement(slotIndex);
+      const cameraId = CAMERA_BY_SLOT[slotIndex];
+      const dets = latestDetectionsByCamera.get(cameraId) || [];
+      renderDetectionsForCamera(cameraId, dets);
+    };
+
     img.src = `data:${mimeType};base64,${base64Data}`;
-    showVideoElement(slotIndex);
+  }
+  function updateLatestDetections(detections) {
+    latestDetectionsByCamera.clear();
+
+    for (const d of detections) {
+      const cam = (d.camera_id || "").toLowerCase().replace(/\s/g, "_");
+      if (!latestDetectionsByCamera.has(cam)) latestDetectionsByCamera.set(cam, []);
+      latestDetectionsByCamera.get(cam).push(d);
+    }
+
+    renderAllDetections(detections);
   }
 
   function setFeedLabel(slotIndex, label){
@@ -384,7 +644,6 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
       const res = await fetch(path, { cache: "no-store" });
       let base64 = await res.text();
 
-      // remove whitespace/newlines that can break base64 data URLs
       base64 = base64.replace(/\s+/g, "");
 
       const img = document.getElementById(`vid${slotIndex}`);
@@ -417,22 +676,22 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
     "data:image/svg+xml;base64," + btoa(`
       <svg xmlns="http://www.w3.org/2000/svg" width="376" height="211">
         <rect width="100%" height="100%" fill="#111"/>
-        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle">Feed 1</text>
-        <text x="50%" y="60%" fill="#7ee787" font-size="16" text-anchor="middle">Base64 demo frame</text>
+        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Feed 1</text>
+        <text x="50%" y="60%" fill="#7ee787" font-size="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">professional demo frame</text>
       </svg>
     `),
     "data:image/svg+xml;base64," + btoa(`
       <svg xmlns="http://www.w3.org/2000/svg" width="376" height="211">
         <rect width="100%" height="100%" fill="#1b1f2a"/>
-        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle">Feed 2</text>
-        <text x="50%" y="60%" fill="#ffcc66" font-size="16" text-anchor="middle">Base64 demo frame</text>
+        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Feed 2</text>
+        <text x="50%" y="60%" fill="#ffcc66" font-size="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">professional demo frame</text>
       </svg>
     `),
     "data:image/svg+xml;base64," + btoa(`
       <svg xmlns="http://www.w3.org/2000/svg" width="376" height="211">
         <rect width="100%" height="100%" fill="#202830"/>
-        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle">Feed 3</text>
-        <text x="50%" y="60%" fill="#79c0ff" font-size="16" text-anchor="middle">Base64 demo frame</text>
+        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Feed 3</text>
+        <text x="50%" y="60%" fill="#79c0ff" font-size="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">professional demo frame</text>
       </svg>
     `)
   ];
@@ -459,7 +718,7 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
         const dataUrl = await fetchFrameAsDataUrl(path);
         frames.push(dataUrl);
       } catch {
-        break; // stop when frames run out
+        break;
       }
     }
 
@@ -476,15 +735,21 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
     const img = document.getElementById(`vid${slotIndex}`);
     if (!img) return;
 
+    if (demoFrameTimer) {
+      clearInterval(demoFrameTimer);
+      demoFrameTimer = null;
+    }
+
     let i = 0;
 
-    // show first frame immediately
     img.src = frames[0];
     showVideoElement(slotIndex);
 
-    setInterval(() => {
-      img.src = frames[i];
+    demoFrameTimer = setInterval(() => {
+      if (isPaused) return;
+
       i = (i + 1) % frames.length;
+      img.src = frames[i];
     }, Math.round(1000 / fps));
   }
 
@@ -512,8 +777,64 @@ ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=incr
   setFeedLabel(4, "back");
   setFeedLabel(5, "back_right");
 
+  const SAMPLE_JSON_PATH = "./CAM_FRONT_sample.json";
+  const PLAYBACK_INTERVAL_MS = 150;
+
+  let isPaused = false;
+  let demoFrameTimer = null;
+  let samplePlaybackTimer = null;
+  let hoveredObjectLabel = null;
+
+  // Debug!!! Spacebar toggle
+  window.addEventListener("keydown", (e) => {
+    const tag = (e.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+
+    if (e.code === "Space") {
+      e.preventDefault();
+      isPaused = !isPaused;
+
+      wsStatus.textContent = isPaused ? "paused" : (DEMO_MODE ? "demo mode" : "connected");
+      feedStatus.textContent = isPaused ? "paused" : (DEMO_MODE ? "demo mode" : "connected");
+    }
+  });
+
+  async function startSamplePlayback() {
+    try {
+      const res = await fetch(SAMPLE_JSON_PATH, { cache: "no-store" });
+      const frames = await res.json();
+
+      if (!Array.isArray(frames) || !frames.length) {
+        console.error("No playback frames found in sample JSON");
+        return;
+      }
+
+      if (samplePlaybackTimer) {
+        clearInterval(samplePlaybackTimer);
+        samplePlaybackTimer = null;
+      }
+
+      let idx = 0;
+
+      samplePlaybackTimer = setInterval(() => {
+        if (isPaused) return;
+
+        const frame = frames[idx];
+        const dets = frameToDetections(frame);
+
+        updateLatestDetections(dets);
+        refreshRiskTableFromDetections(dets);
+
+        idx = (idx + 1) % frames.length;
+      }, PLAYBACK_INTERVAL_MS);
+    } catch (err) {
+      console.error("Failed to start sample playback:", err);
+    }
+  }
+
   if (DEMO_MODE) {
     runLocalDemo();
+    startSamplePlayback(); 
   } else {
     let feedWS;
     try{
