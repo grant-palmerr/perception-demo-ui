@@ -27,25 +27,41 @@ function cameraIdFromMetadata(camera) {
 
 function frameToDetections(frame) {
   const meta = frame && frame.metadata ? frame.metadata : {};
-  const cam = cameraIdFromMetadata(meta.camera);
+  const cam = cameraIdFromMetadata(frame.cam_id || meta.camera);
   const tracks = frame && frame.tracks ? frame.tracks : {};
   const out = [];
 
-  for (const [trackId, arr] of Object.entries(tracks)) {
-    if (!Array.isArray(arr) || arr.length < 6) continue;
-    const x1 = Number(arr[0]);
-    const y1 = Number(arr[1]);
-    const x2 = Number(arr[2]);
-    const y2 = Number(arr[3]);
-    const conf = Number(arr[4]);
-    const classId = Math.floor(Number(arr[5]));
+  for (const [trackId, track] of Object.entries(tracks)) {
+    let x1, y1, x2, y2, conf, classId, anomalyScore, isAnomaly;
+
+    if (Array.isArray(track)) {
+      // Legacy array format: [x1, y1, x2, y2, conf, classId, anomaly_score?, is_anomaly?]
+      if (track.length < 6) continue;
+      [x1, y1, x2, y2, conf, classId] = track;
+      anomalyScore = track.length >= 7 ? Number(track[6]) : null;
+      isAnomaly = track.length >= 8 ? !!track[7] : (anomalyScore != null && anomalyScore > 0.5);
+    } else if (track && typeof track === "object") {
+      // New object format: { bbox, score, class_id, anomaly_score }
+      const bbox = track.bbox;
+      if (!Array.isArray(bbox) || bbox.length < 4) continue;
+      [x1, y1, x2, y2] = bbox;
+      conf = Number(track.score ?? 0);
+      classId = Math.floor(Number(track.class_id ?? 0));
+      anomalyScore = track.anomaly_score != null ? Number(track.anomaly_score) : null;
+      isAnomaly = anomalyScore != null && anomalyScore > 0.5;
+    } else {
+      continue;
+    }
+
     const objectClass = CLASS_NAMES[classId] ?? `class_${classId}`;
     out.push({
       camera_id: cam,
       object_class: objectClass,
       bounding_box: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
       track_id: trackId,
-      confidence: conf
+      confidence: conf,
+      anomaly_score: anomalyScore,
+      is_anomaly: isAnomaly
     });
   }
   return out;
@@ -72,9 +88,18 @@ self.onmessage = async (e) => {
 
   if (parsed.tracks && parsed.metadata) {
     const meta = parsed.metadata;
-    const cameraId = cameraIdFromMetadata(meta.camera);
+    const cameraId = cameraIdFromMetadata(parsed.cam_id || meta.camera);
     const detections = frameToDetections(parsed);
     const t2 = performance.now();        // after frameToDetections
+
+    // DEBUG — remove once working
+    if (frameCount <= 3) {
+      console.log(`[worker #${frameCount}] cam_id=${parsed.cam_id} → cameraId=${cameraId}`);
+      console.log(`[worker #${frameCount}] tracks keys:`, Object.keys(parsed.tracks).slice(0, 5));
+      const firstKey = Object.keys(parsed.tracks)[0];
+      if (firstKey != null) console.log(`[worker #${frameCount}] tracks[${firstKey}]:`, parsed.tracks[firstKey]);
+      console.log(`[worker #${frameCount}] detections.length=${detections.length}`);
+    }
 
     let bitmap = null;
     if (parsed.image) {

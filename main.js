@@ -116,6 +116,13 @@ frameWorker.onmessage = (e) => {
 
   if (msg.type === "frame") {
     const { frameId, cameraId, detections, meta, bitmap, workerDoneAt } = msg;
+
+    // DEBUG — remove once working
+    if (frameId <= 3) {
+      console.log(`[main #${frameId}] cameraId=${cameraId} detections=${detections.length} bitmap=${!!bitmap}`);
+      if (detections.length > 0) console.log(`[main #${frameId}] first detection:`, detections[0]);
+    }
+
     if (bitmap) {
       if (liveBitmaps[cameraId]) liveBitmaps[cameraId].close();
       liveBitmaps[cameraId] = bitmap;
@@ -201,36 +208,47 @@ function rerenderAllCameras() {
 // redraw a single camera slot using its stored detections — used for hover highlight
 function rerenderCamera(cameraId) {
   const slot = document.querySelector(`.camera-slot[data-camera="${cameraId}"]`);
-  if (!slot) return;
+  if (!slot) { console.warn(`[render] no slot for cameraId="${cameraId}"`); return; }
   const canvas = slot.querySelector("canvas");
   if (!canvas) return;
   const bitmap = liveBitmaps[cameraId];
-  if (!bitmap) return;
+  const dets = latestDetectionsByCamera.get(cameraId) || [];
+  console.log(`[render] cameraId=${cameraId} bitmap=${!!bitmap} detections=${dets.length}`);
 
   showCameraSlot(cameraId);
   const img = slot.querySelector("img");
-  if (img) img.hidden = true;
-  if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-  }
 
-  const ctx = canvas.getContext("2d");
-  ctx.drawImage(bitmap, 0, 0);
+  if (bitmap) {
+    if (img) img.hidden = true;
+    if (canvas.width !== bitmap.width || canvas.height !== bitmap.height) {
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+    }
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bitmap, 0, 0);
+    const cssScale = canvas.width / (canvas.clientWidth || canvas.width);
+    ctx.lineWidth = Math.max(1, Math.round(cssScale));
 
-  const cssScale = canvas.width / canvas.clientWidth;
-  ctx.lineWidth = Math.round(cssScale);
+    const detections = (latestDetectionsByCamera.get(cameraId) || [])
+      .filter(d => !appState.hiddenClasses.has(d.object_class));
+    for (const d of detections) drawBoundingBox(ctx, d, 1, 1);
 
-  const detections = (latestDetectionsByCamera.get(cameraId) || [])
-    .filter(d => !appState.hiddenClasses.has(d.object_class));
-  for (const d of detections) drawBoundingBox(ctx, d, 1, 1);
+    const grace = getGracePeriodDetections(cameraId)
+      .filter(d => !appState.hiddenClasses.has(d.object_class));
+    if (grace.length > 0) {
+      ctx.globalAlpha = 0.45;
+      for (const d of grace) drawBoundingBox(ctx, d, 1, 1);
+      ctx.globalAlpha = 1;
+    }
+  } else if (canvas.width && canvas.height) {
+    // No bitmap yet — still draw detections on whatever is already on the canvas
+    const ctx = canvas.getContext("2d");
+    const cssScale = canvas.width / (canvas.clientWidth || canvas.width);
+    ctx.lineWidth = Math.max(1, Math.round(cssScale));
 
-  const grace = getGracePeriodDetections(cameraId)
-    .filter(d => !appState.hiddenClasses.has(d.object_class));
-  if (grace.length > 0) {
-    ctx.globalAlpha = 0.45;
-    for (const d of grace) drawBoundingBox(ctx, d, 1, 1);
-    ctx.globalAlpha = 1;
+    const detections = (latestDetectionsByCamera.get(cameraId) || [])
+      .filter(d => !appState.hiddenClasses.has(d.object_class));
+    for (const d of detections) drawBoundingBox(ctx, d, 1, 1);
   }
 }
 
@@ -243,7 +261,7 @@ function renderTrackTable() {
   trackTbody.innerHTML = "";
 
   if (all.length === 0) {
-    trackTbody.innerHTML = '<tr><td colspan="2" class="track-empty">No active tracks.</td></tr>';
+    trackTbody.innerHTML = '<tr><td colspan="3" class="track-empty">No active tracks.</td></tr>';
     return;
   }
 
@@ -251,13 +269,35 @@ function renderTrackTable() {
     if (appState.hiddenClasses.has(d.object_class)) continue;
     const tr = document.createElement("tr");
     if (disappearedAt !== null) tr.classList.add("track-row-inactive");
+    if (d.is_anomaly && disappearedAt === null) tr.classList.add("track-row-anomaly");
 
     const tdId = document.createElement("td");
     tdId.textContent = "#" + d.track_id;
 
     const tdClass = document.createElement("td");
     tdClass.textContent = (d.object_class || "unknown").replace(/_/g, " ");
-    if (disappearedAt === null) tdClass.style.color = classColor(d.object_class);
+    if (disappearedAt === null) {
+      tdClass.style.color = d.is_anomaly ? "#ff5555" : classColor(d.object_class);
+    }
+
+    const tdAnomaly = document.createElement("td");
+    if (disappearedAt === null) {
+      if (d.is_anomaly) {
+        const badge = document.createElement("span");
+        badge.className = "anomaly-badge";
+        badge.textContent = d.anomaly_score != null
+          ? `⚠ ${d.anomaly_score.toFixed(2)}`
+          : "⚠ anomaly";
+        tdAnomaly.appendChild(badge);
+      } else {
+        const ok = document.createElement("span");
+        ok.className = "anomaly-badge-normal";
+        ok.textContent = d.anomaly_score != null
+          ? d.anomaly_score.toFixed(2)
+          : "—";
+        tdAnomaly.appendChild(ok);
+      }
+    }
 
     if (String(d.track_id) === String(appState.lockedTrackId)) {
       tr.classList.add("track-row-locked");
@@ -282,6 +322,7 @@ function renderTrackTable() {
 
     tr.appendChild(tdId);
     tr.appendChild(tdClass);
+    tr.appendChild(tdAnomaly);
     trackTbody.appendChild(tr);
   }
 }
@@ -347,18 +388,30 @@ function cameraIdFromMetadata(camera) {
 // turns one json frame into the shape renderViewer already likes
 function frameToDetections(frame) {
   const meta = frame && frame.metadata ? frame.metadata : {};
-  const cam = cameraIdFromMetadata(meta.camera);
+  const cam = cameraIdFromMetadata(frame.cam_id || meta.camera);
   const tracks = frame && frame.tracks ? frame.tracks : {};
   const out = [];
 
-  for (const [trackId, arr] of Object.entries(tracks)) {
-    if (!Array.isArray(arr) || arr.length < 6) continue;
-    const x1 = Number(arr[0]);
-    const y1 = Number(arr[1]);
-    const x2 = Number(arr[2]);
-    const y2 = Number(arr[3]);
-    const conf = Number(arr[4]);
-    const classId = Math.floor(Number(arr[5]));
+  for (const [trackId, track] of Object.entries(tracks)) {
+    let x1, y1, x2, y2, conf, classId, anomalyScore, isAnomaly;
+
+    if (Array.isArray(track)) {
+      if (track.length < 6) continue;
+      [x1, y1, x2, y2, conf, classId] = track;
+      anomalyScore = track.length >= 7 ? Number(track[6]) : null;
+      isAnomaly = track.length >= 8 ? !!track[7] : (anomalyScore != null && anomalyScore > 0.5);
+    } else if (track && typeof track === "object") {
+      const bbox = track.bbox;
+      if (!Array.isArray(bbox) || bbox.length < 4) continue;
+      [x1, y1, x2, y2] = bbox;
+      conf = Number(track.score ?? 0);
+      classId = Math.floor(Number(track.class_id ?? 0));
+      anomalyScore = track.anomaly_score != null ? Number(track.anomaly_score) : null;
+      isAnomaly = anomalyScore != null && anomalyScore > 0.5;
+    } else {
+      continue;
+    }
+
     const objectClass = CLASS_NAMES[classId] ?? `class_${classId}`;
 
     out.push({
@@ -371,7 +424,9 @@ function frameToDetections(frame) {
         [x1, y2]
       ],
       track_id: trackId,
-      confidence: conf
+      confidence: conf,
+      anomaly_score: anomalyScore,
+      is_anomaly: isAnomaly
     });
   }
   return out;
@@ -405,23 +460,42 @@ function drawBoundingBox(ctx, d, sx, sy) {
     .filter(Boolean)
     .map(([x, y]) => [x * scaleX, y * scaleY]);
   if (points.length !== 4) return;
-  const color = classColor(d.object_class);
+
+  ctx.save();
+
+  const isAnomaly = !!d.is_anomaly;
+  const color = isAnomaly ? "#ff3333" : classColor(d.object_class);
   ctx.strokeStyle = color;
+
+  if (isAnomaly) {
+    ctx.setLineDash([6, 3]);
+    ctx.shadowColor = "#ff3333";
+    ctx.shadowBlur = 8;
+  }
+
   ctx.beginPath();
   ctx.moveTo(points[0][0], points[0][1]);
   for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
   ctx.closePath();
+
   const highlightId = appState.hoveredTrackId ?? appState.lockedTrackId;
   if (highlightId != null && String(d.track_id) === String(highlightId)) {
-    ctx.fillStyle = color + "33"; // ~20% opacity fill
+    ctx.fillStyle = color + "33";
     ctx.fill();
   }
   ctx.stroke();
+
+  ctx.restore();
+
   if (d.object_class) {
-    ctx.fillStyle = color;
     const fontPx = Math.max(10, Math.round(12 * Math.min(scaleX, scaleY)));
     ctx.font = fontPx + "px sans-serif";
-    ctx.fillText(d.object_class, points[0][0], points[0][1] - 4);
+    ctx.fillStyle = color;
+    let label = d.object_class;
+    if (isAnomaly && d.anomaly_score != null) {
+      label += `  ⚠ ${d.anomaly_score.toFixed(2)}`;
+    }
+    ctx.fillText(label, points[0][0], points[0][1] - 4);
   }
 }
 
