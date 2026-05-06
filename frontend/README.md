@@ -1,50 +1,28 @@
-# Perception demo UI
+# Perception Demo UI (Frontend)
 
-Little **HTML/CSS/JS** thing for class — six fake camera tiles, green boxes when we have detections. The **`CAM_FRONT_sample.json`** in the repo is only for **offline playback** on the **front** cam.
+Static HTML/CSS/JS UI that renders camera tiles and overlays detections received
+over a WebSocket stream.
 
----
+## Run locally
 
-## Run it with the sample json
+1. Start a static server in this folder.
+2. Open http://127.0.0.1:8080/ in a browser.
+3. Click “Connect” and confirm the WebSocket URL (default is
+   ws://127.0.0.1:8000/tracking).
 
-1. **Open a terminal** (Cursor/VS Code terminal is fine, or Terminal.app).
+## Configuration
 
-2. **cd into the repo:**
-   ```bash
-   cd ~/Desktop/perception-demo-ui
-   ```
-   Run `ls` and make sure **`CAM_FRONT_sample.json`** is there.
+- Default WebSocket URL: edit DEFAULT_WEBSOCKET_URL in main.js.
+- The UI stores the WebSocket URL in localStorage (key: wsUrl).
+- Object class names are defined in worker.js (CLASS_NAMES).
 
-3. **Tiny http server** (Python is already on Macs usually):
-   ```bash
-   python3 -m http.server 8080
-   ```
-   Leave it running. Ctrl+C to stop.
+## Backend expectation
 
-4. **Browser:**
-   ```
-   http://127.0.0.1:8080/?playback=1
-   ```
-   The **`?playback=1`** bit matters — that’s what loads the json and flips through frames. No ssh tunnel needed for this.
+The UI expects frames from the /tracking WebSocket with:
 
-5. Uncheck **“Show object detection”** if you just want the placeholders. Only **front** gets real tracks from this file right now.
+- cam_id
+- metadata
+- tracks (object format with bbox/score/class_id/anomaly_score)
+- image (base64-encoded JPEG)
 
-**Don’t** open `index.html` straight from Finder for playback — **`fetch` dies on file://** most of the time.
-
----
-
-## What you need
-
-- Python 3  
-- These files together: `index.html`, `main.js`, `CAM_FRONT_sample.json`
-
----
-
-## Live WebSocket mode (optional)
-
-`http://127.0.0.1:8080/` **without** `?playback` — talks to **`ws://127.0.0.1:8001/tracking`** (tunnel + backend situation). Different from the json playback thing.
-
----
-
-## Random note
-
-Front camera boxes get scaled from **1600×900** idea into whatever image size we show — mess with **`ANNOTATION_SIZE_BY_CAMERA`** in `main.js` if your data isn’t nuScenes-shaped.
+See backend/README.md for the full API details.
