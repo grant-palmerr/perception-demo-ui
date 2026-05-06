@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Perception Demo</title>
+  <style>
+    :root {
+      --bg-page: #1e1e24;
+      --bg-panel: #2a2a32;
+      --bg-header: #25252d;
+      --border-subtle: rgba(255, 255, 255, 0.08);
+      --text-primary: #e8e8ed;
+      --text-muted: #9898a6;
+      --accent: #3d9cfd;
+      --label-bg: #0d0d10;
+      --label-text: #7cfc9a;
+      --radius: 10px;
+      --shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg-page);
+      color: var(--text-primary);
+      line-height: 1.45;
+    }
+
+    .app {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      padding: 1rem 1.25rem;
+      box-sizing: border-box;
+      gap: 0.75rem;
+    }
+
+    .ws-status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--text-muted);
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .ws-status-dot[data-status="connected"] {
+      background: #2ecc71;
+      box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.25);
+    }
+
+    .ws-status-dot[data-status="connecting"] {
+      background: var(--accent);
+      box-shadow: 0 0 0 2px rgba(61, 156, 253, 0.25);
+    }
+
+    .ws-status-dot[data-status="error"] {
+      background: #e74c3c;
+      box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.25);
+    }
+
+    .ws-status-dot[data-status="playback"] {
+      background: #9b59b6;
+      box-shadow: 0 0 0 2px rgba(155, 89, 182, 0.25);
+    }
+
+    .ws-status-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .controls-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.75rem 1.25rem;
+      padding: 0.65rem 1rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+    }
+
+    .controls-bar label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.875rem;
+      color: var(--text-primary);
+      user-select: none;
+    }
+
+    .controls-bar input[type="checkbox"] {
+      width: 1.1rem;
+      height: 1.1rem;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .controls-bar .controls-hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin: 0;
+    }
+
+    .controls-bar .controls-hint code {
+      font-size: 0.7rem;
+      background: var(--label-bg);
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .ws-url-group {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+
+    .ws-url-group label {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      cursor: default;
+    }
+
+    .ws-url-group input[type="text"] {
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+      font-size: 0.8rem;
+      background: var(--label-bg);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 0.3rem 0.6rem;
+      width: 22rem;
+      max-width: 100%;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .ws-url-group input[type="text"]:focus {
+      border-color: var(--accent);
+    }
+
+    .ws-url-group button {
+      font-size: 0.8rem;
+      padding: 0.3rem 0.9rem;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .ws-url-group button:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .controls-bar, .class-filters {
+      flex-shrink: 0;
+    }
+
+    .class-filters {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 0.4rem 1rem;
+      padding: 0.6rem 1rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+    }
+
+    .class-filter-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.8rem;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .class-filter-label input[type="checkbox"] {
+      width: 0.9rem;
+      height: 0.9rem;
+      cursor: pointer;
+    }
+
+    .class-filter-all {
+      color: var(--text-primary) !important;
+      font-weight: 600;
+    }
+
+    .class-filter-sep {
+      width: 1px;
+      height: 1.1rem;
+      background: var(--border-subtle);
+      margin: 0 0.25rem;
+    }
+
+    .viewer-layout {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      gap: 1rem;
+      align-items: stretch;
+    }
+
+    .viewer-main {
+      flex: 1;
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+
+    .viewer-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin: 0;
+      flex-shrink: 0;
+    }
+
+    #viewer {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr); /* JS overrides based on active slot count */
+      grid-auto-rows: 1fr;
+      gap: 1rem;
+    }
+
+    .camera-slot {
+      display: none;
+      flex-direction: column;
+      gap: 0.4rem;
+      min-height: 0;
+    }
+
+    .camera-slot.active {
+      display: flex;
+    }
+
+    .camera-frame {
+      flex: 1;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: var(--radius);
+      overflow: hidden;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      box-shadow: var(--shadow);
+    }
+
+    /* img is only used for loading in playback — canvas is always the display element */
+    .camera-frame img {
+      display: none;
+    }
+
+    /* canvas carries its intrinsic dimensions (e.g. 1600×900); max-width + max-height
+       gives object-fit:contain behaviour — scales to fit frame without stretching */
+    .camera-frame canvas {
+      display: block;
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+    .camera-label {
+      display: block;
+      flex-shrink: 0;
+      text-align: center;
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+      font-size: 0.75rem;
+      color: var(--label-text);
+      background: var(--label-bg);
+      padding: 0.35rem 0.5rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .anomaly-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      padding: 0.1rem 0.35rem;
+      border-radius: 4px;
+      border: 1px solid #ff3333;
+      background: rgba(255, 51, 51, 0.15);
+      color: #ff5555;
+      white-space: nowrap;
+    }
+
+    .anomaly-badge-normal {
+      display: inline-flex;
+      align-items: center;
+      font-size: 0.7rem;
+      color: #2ecc71;
+      white-space: nowrap;
+    }
+
+    @keyframes anomaly-pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.55; }
+    }
+
+    .track-row-anomaly .anomaly-badge {
+      animation: anomaly-pulse 1.2s ease-in-out infinite;
+    }
+
+    .track-row-anomaly td {
+      background: rgba(255, 51, 51, 0.05);
+    }
+
+    .track-panel {
+      flex: 0 0 300px;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .track-panel-title {
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
+      margin: 0;
+      padding: 0.6rem 0.75rem;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .track-table-wrap {
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    table.track-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.8rem;
+    }
+
+    table.track-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--bg-header);
+      color: var(--text-muted);
+      text-align: left;
+      font-weight: 600;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 0.4rem 0.75rem;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    table.track-table tbody td {
+      padding: 0.35rem 0.75rem;
+      border-bottom: 1px solid var(--border-subtle);
+      font-family: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+      white-space: nowrap;
+    }
+
+    table.track-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .track-empty {
+      color: var(--text-muted);
+      font-family: system-ui, sans-serif;
+      font-style: italic;
+    }
+
+    .track-row-inactive td {
+      text-decoration: line-through;
+      opacity: 0.4;
+    }
+
+    table.track-table tbody tr {
+      cursor: pointer;
+    }
+
+    table.track-table tbody tr:hover td {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .track-row-locked td {
+      background: rgba(255, 255, 255, 0.09) !important;
+      border-left: 2px solid var(--accent);
+    }
+
+    /* ── Health group ── */
+    .health-group {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .health-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: var(--text-muted);
+      transition: background 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .health-dot[data-status="running"] {
+      background: #2ecc71;
+      box-shadow: 0 0 0 2px rgba(46, 204, 113, 0.25);
+    }
+
+    .health-dot[data-status="stopped"] {
+      background: #e74c3c;
+      box-shadow: 0 0 0 2px rgba(231, 76, 60, 0.25);
+    }
+
+    /* ── Config button ── */
+    .config-open-btn {
+      margin-left: auto;
+      font-size: 0.8rem;
+      padding: 0.3rem 0.9rem;
+      border-radius: 6px;
+      border: 1px solid var(--border-subtle);
+      background: transparent;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+      white-space: nowrap;
+    }
+
+    .config-open-btn:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    /* ── Sequence banner ── */
+    .seq-banner {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 1rem;
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius);
+      font-size: 0.8rem;
+      color: var(--text-primary);
+      flex-shrink: 0;
+    }
+
+    .seq-banner[data-state="done"] {
+      border-color: rgba(155, 89, 182, 0.4);
+      background: rgba(155, 89, 182, 0.08);
+    }
+
+    .seq-banner[data-state="end"] {
+      border-color: rgba(61, 156, 253, 0.3);
+    }
+
+    .seq-banner-dismiss {
+      margin-left: auto;
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 0.9rem;
+      padding: 0;
+      line-height: 1;
+    }
+
+    .seq-banner-dismiss:hover { color: var(--text-primary); }
+
+    .seq-reconnect-btn {
+      font-size: 0.75rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 5px;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    .seq-reconnect-btn:hover {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    /* ── Config panel ── */
+    .config-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 100;
+    }
+
+    .config-overlay[hidden], .config-panel[hidden] { display: none; }
+
+    .config-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      width: 360px;
+      max-width: 100vw;
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border-subtle);
+      z-index: 101;
+      display: flex;
+      flex-direction: column;
+      box-shadow: -4px 0 24px rgba(0, 0, 0, 0.4);
+    }
+
+    .config-panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.75rem 1rem;
+      border-bottom: 1px solid var(--border-subtle);
+      flex-shrink: 0;
+    }
+
+    .config-panel-title {
+      margin: 0;
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+    }
+
+    .config-close-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1rem;
+      cursor: pointer;
+      padding: 0.1rem 0.3rem;
+      line-height: 1;
+    }
+
+    .config-close-btn:hover { color: var(--text-primary); }
+
+    .config-panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .config-loading {
+      color: var(--text-muted);
+      font-style: italic;
+      font-size: 0.85rem;
+      margin: 0;
+    }
+
+    .config-field {
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+
+    .config-field-label {
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+    }
+
+    .config-field-hint {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+    }
+
+    .config-field input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+    }
+
+    .config-field input[type="number"] {
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 0.85rem;
+      background: var(--label-bg);
+      color: var(--text-primary);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 0.3rem 0.6rem;
+      width: 100%;
+      outline: none;
+    }
+
+    .config-field input[type="number"]:focus {
+      border-color: var(--accent);
+    }
+
+    .config-range-row {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .config-range-row input[type="range"] { flex: 1; }
+
+    .config-range-value {
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      font-size: 0.8rem;
+      color: var(--text-primary);
+      min-width: 2.5rem;
+      text-align: right;
+    }
+
+    .config-cameras-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+    }
+
+    .config-cam-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.2rem 0.6rem;
+      border-radius: 4px;
+      background: var(--label-bg);
+      border: 1px solid var(--border-subtle);
+      font-size: 0.75rem;
+      font-family: ui-monospace, "Cascadia Code", monospace;
+      color: var(--text-muted);
+      cursor: pointer;
+      user-select: none;
+      transition: border-color 0.12s, color 0.12s;
+    }
+
+    .config-cam-chip.selected {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+
+    .config-toggle {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      cursor: pointer;
+      font-size: 0.85rem;
+      color: var(--text-primary);
+    }
+
+    .config-toggle input[type="checkbox"] {
+      accent-color: var(--accent);
+      width: 1rem;
+      height: 1rem;
+      cursor: pointer;
+    }
+
+    .config-panel-footer {
+      padding: 0.75rem 1rem;
+      border-top: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      flex-shrink: 0;
+    }
+
+    .config-feedback {
+      font-size: 0.8rem;
+      flex: 1;
+    }
+
+    .config-feedback[data-state="ok"] { color: #2ecc71; }
+    .config-feedback[data-state="err"] { color: #e74c3c; }
+
+    .config-apply-btn {
+      font-size: 0.8rem;
+      padding: 0.35rem 1rem;
+      border-radius: 6px;
+      border: 1px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      cursor: pointer;
+      transition: background 0.15s, color 0.15s;
+    }
+
+    .config-apply-btn:hover:not(:disabled) {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    .config-apply-btn:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="controls-bar" role="group" aria-label="Display options">
+      <div class="ws-url-group" id="ws-url-group">
+        <span class="ws-status-dot" id="ws-status-dot" data-status="disconnected"></span>
+        <label for="ws-url-input">WebSocket URL</label>
+        <input type="text" id="ws-url-input" spellcheck="false" autocomplete="off" />
+        <button id="ws-connect-btn">Connect</button>
+        <span class="ws-status-label" id="ws-status-label">disconnected</span>
+      </div>
+      <div class="health-group" id="health-group">
+        <span class="health-dot" id="health-inference-dot"></span>
+        <span class="ws-status-label" id="health-label">—</span>
+        <span class="ws-status-label" id="health-subs-label"></span>
+        <span class="ws-status-label health-fps-sep">|</span>
+        <span class="ws-status-label" id="fps-label">— fps</span>
+      </div>
+      <button class="config-open-btn" id="config-open-btn" title="Pipeline configuration">Config</button>
+    </div>
+    <div class="seq-banner" id="seq-banner" hidden>
+      <span id="seq-banner-text"></span>
+      <button class="seq-banner-dismiss" id="seq-banner-dismiss" aria-label="Dismiss">&#x2715;</button>
+    </div>
+    <div class="class-filters" id="class-filters"></div>
+    <div class="viewer-layout">
+      <div class="viewer-main">
+        <div id="viewer">
+          <div class="camera-slot" data-camera="front_left">
+            <div class="camera-frame">
+              <img alt="Front left camera" />
+              <canvas></canvas>
+            </div>
+            <span class="camera-label">front_left</span>
+          </div>
+          <div class="camera-slot" data-camera="front">
+            <div class="camera-frame">
+              <img alt="Front camera" />
+              <canvas></canvas>
+            </div>
+            <span class="camera-label">front</span>
+          </div>
+          <div class="camera-slot" data-camera="front_right">
+            <div class="camera-frame">
+              <img alt="Front right camera" />
+              <canvas></canvas>
+            </div>
+            <span class="camera-label">front_right</span>
+          </div>
+          <div class="camera-slot" data-camera="back_left">
+            <div class="camera-frame">
+              <img alt="Back left camera" />
+              <canvas></canvas>
+            </div>
+            <span class="camera-label">back_left</span>
+          </div>
+          <div class="camera-slot" data-camera="back">
+            <div class="camera-frame">
+              <img alt="Back camera" />
+              <canvas></canvas>
+            </div>
+            <span class="camera-label">back</span>
+          </div>
+          <div class="camera-slot" data-camera="back_right">
+            <div class="camera-frame">
+              <img alt="Back right camera" />
+              <canvas></canvas>
+            </div>
+            <span class="camera-label">back_right</span>
+          </div>
+        </div>
+      </div>
+      <aside class="track-panel">
+        <p class="track-panel-title">Active tracks</p>
+        <div class="track-table-wrap">
+          <table class="track-table">
+            <thead>
+              <tr>
+                <th>Track</th>
+                <th>Class</th>
+                <th>Anomaly</th>
+              </tr>
+            </thead>
+            <tbody id="track-tbody">
+              <tr><td colspan="3" class="track-empty">No active tracks.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </aside>
+    </div>
+  </div>
+  <div class="config-overlay" id="config-overlay" hidden></div>
+  <aside class="config-panel" id="config-panel" hidden aria-label="Pipeline configuration">
+    <header class="config-panel-header">
+      <h2 class="config-panel-title">Pipeline Config</h2>
+      <button class="config-close-btn" id="config-close-btn" aria-label="Close config">&#x2715;</button>
+    </header>
+    <div class="config-panel-body" id="config-panel-body">
+      <p class="config-loading" id="config-loading">Loading&hellip;</p>
+    </div>
+    <footer class="config-panel-footer">
+      <span class="config-feedback" id="config-feedback"></span>
+      <button class="config-apply-btn" id="config-apply-btn" disabled>Apply</button>
+    </footer>
+  </aside>
+  <script src="main.js"></script>
+</body>
+</html>

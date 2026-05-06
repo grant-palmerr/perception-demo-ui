@@ -1,0 +1,13 @@
+inFileFormat    = 1
+numFrames   = 5
+postProcType   = 0
+postProcDataId   = 0
+quantRangeUpdateFactor   = -1.000000
+inData   = /mnt/c/Users/Willi/Desktop/Repos/EdgeAI-Training/edgeai-tidl-tools-11_00_06_00/model-artifacts/od-custom-yolox_nano_lite_nuimages_onnx/artifacts/tempDir/subgraph_0_calib_raw_data.bin
+outData   = "/mnt/c/Users/Willi/Desktop/Repos/EdgeAI-Training/edgeai-tidl-tools-11_00_06_00/model-artifacts/od-custom-yolox_nano_lite_nuimages_onnx/artifacts/tempDir/subgraph_0_tidl_io__stats_tool_out.bin"
+netBinFile     = /mnt/c/Users/Willi/Desktop/Repos/EdgeAI-Training/edgeai-tidl-tools-11_00_06_00/model-artifacts/od-custom-yolox_nano_lite_nuimages_onnx/artifacts/tempDir/subgraph_0_tidl_net.bin
+ioConfigFile        = /mnt/c/Users/Willi/Desktop/Repos/EdgeAI-Training/edgeai-tidl-tools-11_00_06_00/model-artifacts/od-custom-yolox_nano_lite_nuimages_onnx/artifacts/tempDir/subgraph_0_tidl_io_1.bin
+writeTraceLevel        = 0
+debugTraceLevel        = 0
+traceDumpBaseName        = "/mnt/c/Users/Willi/Desktop/Repos/EdgeAI-Training/edgeai-tidl-tools-11_00_06_00/model-artifacts/od-custom-yolox_nano_lite_nuimages_onnx/artifacts/tempDir/subgraph_0_tidl_io_
+flowCtrl               = 35

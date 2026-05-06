@@ -1,0 +1,942 @@
+<!--
+NOTE!!
+Before running, run
+mkdir frames
+ffmpeg -i demovid.mp4 -vf "fps=12,scale=376:211:force_original_aspect_ratio=increase,crop=376:211" frames/frame_%04d.jpg
+-->
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TI-EdgeAI-Spring-2026</title>
+  <style>
+    :root{
+      --gap: 12px;
+      --panel-bg:#322E36;
+      --cell-bg:#171a21;
+      --border:#2C292E;
+      --text:white;
+      --muted:white;
+    }
+    *{ box-sizing:border-box; }
+    html,body{ height:100%; margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; background:#2C292E; color:var(--text); }
+
+    .page{
+      height:100%;
+      display:flex;
+      gap:var(--gap);
+      padding:var(--gap);
+    }
+    .left{ flex:0 0 60%; min-width:0; }
+    .right{ flex:0 0 40%; min-width:0; }
+
+    .panel{
+      height:100%;
+      background:var(--panel-bg);
+      border:1px solid var(--border);
+      padding:12px;
+      overflow:hidden;
+      min-height:0;
+    }
+    .right.panel{
+      background: #363636;
+    }
+
+    .panel h2{
+      margin:0 0 10px;
+      font-size:14px;
+      letter-spacing:.2px;
+      color:var(--muted);
+      font-weight:600;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:10px;
+    }
+    .status{
+      font-size:12px;
+      color:var(--muted);
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      white-space:nowrap;
+    }
+    .dot{
+      width:8px;height:8px;border-radius:99px;
+      background:#ff4d4d;
+      box-shadow:0 0 0 2px rgba(255,77,77,.15);
+    }
+    .dot.connected{
+      background:#4dff88;
+      box-shadow:0 0 0 2px rgba(77,255,136,.15);
+    }
+
+    .video-wrap{
+      height:calc(100% - 28px);
+      overflow:auto;
+      padding-right:6px;
+    }
+
+    .video-grid{
+      display:grid;
+      grid-template-columns: repeat(auto-fit, minmax(376px, 1fr));
+      gap:var(--gap);
+      align-items:start;
+    }
+
+    .video-tile{
+      background:transparent;
+      display:flex;
+      flex-direction:column;
+      gap:8px;
+      min-width:0;
+    }
+
+    .video-frame{
+      width:376px;
+      height:211px;
+      background:var(--cell-bg);
+      border:1px dashed rgba(255,255,255,.18);
+      overflow:hidden;
+      position:relative;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .video-frame canvas{
+      position:absolute;
+      top:0;
+      left:0;
+      width:100%;
+      height:100%;
+      pointer-events:none;
+    }
+
+    @supports (width: min(100%, 376px)) {
+      .video-frame{
+        width:min(100%, 376px);
+        aspect-ratio: 376 / 211;
+        height:auto;
+      }
+    }
+
+    .video-frame video{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:none;
+      background:#000;
+    }
+    .video-frame img{
+      width:100%;
+      height:100%;
+      object-fit:cover;
+      display:none;
+      background:#000;
+    }
+
+    .placeholder{
+      padding:10px;
+      text-align:center;
+      color:var(--muted);
+      font-size:12px;
+      line-height:1.4;
+    }
+
+    .feed-label{
+      font-size:12px;
+      color:var(--text);
+      opacity:.9;
+      padding:0 2px;
+      white-space:nowrap;
+      overflow:hidden;
+      text-overflow:ellipsis;
+    }
+
+    .feed-table-wrap{
+      height:calc(100% - 28px);
+      overflow:auto;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,.02);
+    }
+    table.feed{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    table.feed thead th{
+      position:sticky;
+      top:0;
+      background:#1D1A21;
+      color:var(--muted);
+      text-align:left;
+      font-weight:600;
+      padding:10px 12px;
+      border-bottom:1px solid var(--border);
+      z-index:1;
+    }
+    table.feed tbody td{
+      padding:10px 12px;
+      border-bottom:1px solid rgba(42,47,58,.65);
+      vertical-align:top;
+      word-break:break-word;
+    }
+    table.feed tbody tr:hover td{ background:rgba(255,255,255,.03); }
+
+    .risk-pill{
+      display:inline-block;
+      padding:2px 8px;
+      border-radius:999px;
+      border:1px solid rgba(255,255,255,.14);
+      background:rgba(0,0,0,.25);
+      font-size:12px;
+      color:var(--text);
+    }
+
+    @media (max-width: 980px){
+      .page{ flex-direction:column; }
+      .left,.right{ flex:1 1 auto; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="left panel" id="videoPanel">
+      <h2>
+        Video Feeds
+        <span class="status">
+          <span class="dot" id="wsDot"></span>
+          <span id="wsStatus">disconnected</span>
+        </span>
+      </h2>
+
+      <div class="video-wrap">
+        <div class="video-grid" id="videoGrid">
+          <div class="video-tile" data-slot="0">
+            <div class="video-frame">
+              <img id="vid0" alt="Feed 1" />
+              <canvas id="overlay0"></canvas>
+              <div class="placeholder">Pending feed.</div>
+            </div>
+            <div class="feed-label" id="label0">Feed 1</div>
+          </div>
+
+          <div class="video-tile" data-slot="1">
+            <div class="video-frame">
+              <img id="vid1" alt="Feed 2" />
+              <canvas id="overlay1"></canvas>
+              <div class="placeholder">Pending feed.</div>
+            </div>
+            <div class="feed-label" id="label1">Feed 2</div>
+          </div>
+
+          <div class="video-tile" data-slot="2">
+            <div class="video-frame">
+              <img id="vid2" alt="Feed 3" />
+              <canvas id="overlay2"></canvas>
+              <div class="placeholder">Pending feed.</div>
+            </div>
+            <div class="feed-label" id="label2">Feed 3</div>
+          </div>
+
+          <div class="video-tile" data-slot="3">
+            <div class="video-frame">
+              <img id="vid3" alt="Feed 4" />
+              <canvas id="overlay3"></canvas>
+              <div class="placeholder">Pending feed.</div>
+            </div>
+            <div class="feed-label" id="label3">Feed 4</div>
+          </div>
+
+          <div class="video-tile" data-slot="4">
+            <div class="video-frame">
+              <img id="vid4" alt="Feed 5" />
+              <canvas id="overlay4"></canvas>
+              <div class="placeholder">Pending feed.</div>
+            </div>
+            <div class="feed-label" id="label4">Feed 5</div>
+          </div>
+
+          <div class="video-tile" data-slot="5">
+            <div class="video-frame">
+              <img id="vid5" alt="Feed 6" />
+              <canvas id="overlay5"></canvas>
+              <div class="placeholder">Pending feed.</div>
+            </div>
+            <div class="feed-label" id="label5">Feed 6</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="right panel" id="feedPanel">
+      <h2>
+        Risk Detection
+        <span class="status">
+          <span class="dot" id="feedDot"></span>
+          <span id="feedStatus">disconnected</span>
+        </span>
+      </h2>
+
+      <div class="feed-table-wrap">
+        <table class="feed" id="objTable">
+          <thead>
+            <tr>
+              <th style="width: 60%;">Object</th>
+              <th>Risk</th>
+            </tr>
+          </thead>
+          <tbody id="objBody">
+            <tr id="emptyRow">
+              <td colspan="2" style="color:#aab1c3;">No detected objects.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </aside>
+  </div>
+
+<script>
+  const DEMO_MODE = true;
+
+  const VIDEO_WS_URL = "ws://localhost:8080/video";
+  const FEED_WS_URL  = "ws://localhost:8080/feed";
+
+  const wsDot = document.getElementById("wsDot");
+  const wsStatus = document.getElementById("wsStatus");
+
+  const feedDot = document.getElementById("feedDot");
+  const feedStatus = document.getElementById("feedStatus");
+
+  const objBody = document.getElementById("objBody");
+  const emptyRow = document.getElementById("emptyRow");
+
+  const SLOT_BY_CAMERA = {
+  front_left: 0,
+  front: 1,
+  front_right: 2,
+  back_left: 3,
+  back: 4,
+  back_right: 5
+};
+
+const CAMERA_BY_SLOT = {
+  0: "front_left",
+  1: "front",
+  2: "front_right",
+  3: "back_left",
+  4: "back",
+  5: "back_right"
+};
+
+const CLASS_NAMES = [
+  "car",
+  "pedestrian"
+];
+
+const ANNOTATION_SIZE_BY_CAMERA = {
+  front: { w: 1600, h: 900 }
+};
+
+function getAnnotationScale(cameraId, canvasW, canvasH) {
+  const ref = ANNOTATION_SIZE_BY_CAMERA[cameraId];
+  if (!ref || !ref.w || !ref.h) return { sx: 1, sy: 1 };
+  return { sx: canvasW / ref.w, sy: canvasH / ref.h };
+}
+
+function cameraIdFromMetadata(camera) {
+  const key = String(camera || "")
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+    .replace(/^CAM_/, "");
+
+  const map = {
+    FRONT: "front",
+    FRONT_LEFT: "front_left",
+    FRONT_RIGHT: "front_right",
+    BACK: "back",
+    BACK_LEFT: "back_left",
+    BACK_RIGHT: "back_right"
+  };
+
+  return map[key] || "front";
+}
+
+function frameToDetections(frame) {
+  const meta = frame?.metadata || {};
+  const cam = cameraIdFromMetadata(meta.camera);
+  const tracks = frame?.tracks || {};
+  const out = [];
+
+  for (const [trackId, arr] of Object.entries(tracks)) {
+    if (!Array.isArray(arr) || arr.length < 6) continue;
+
+    const [x1, y1, x2, y2, conf, classIdRaw] = arr;
+    const classId = Math.floor(Number(classIdRaw));
+    const objectClass = CLASS_NAMES[classId] ?? `class_${classId}`;
+
+    out.push({
+      camera_id: cam,
+      object_class: objectClass,
+      bounding_box: [
+        [Number(x1), Number(y1)],
+        [Number(x2), Number(y1)],
+        [Number(x2), Number(y2)],
+        [Number(x1), Number(y2)]
+      ],
+      track_id: trackId,
+      confidence: Number(conf)
+    });
+  }
+
+  return out;
+}
+
+  function drawBoundingBox(ctx, d, sx, sy) {
+    const bbox = d.bounding_box;
+    if (!Array.isArray(bbox) || bbox.length < 4) return;
+
+    const pts = bbox.map(([x, y]) => [x * sx, y * sy]);
+    const label = getDetectionLabel(d);
+    const isHovered = hoveredObjectLabel === label;
+
+    ctx.strokeStyle = isHovered ? "yellow" : "lime";
+    ctx.lineWidth = isHovered ? 3 : 2;
+
+    ctx.beginPath();
+    ctx.moveTo(pts[0][0], pts[0][1]);
+    for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
+    ctx.closePath();
+    ctx.stroke();
+
+    ctx.fillStyle = isHovered ? "yellow" : "lime";
+    ctx.font = "12px sans-serif";
+    ctx.fillText(label, pts[0][0], Math.max(12, pts[0][1] - 4));
+  }
+
+  function clearOverlay(slotIndex) {
+    const canvas = document.getElementById(`overlay${slotIndex}`);
+    const img = document.getElementById(`vid${slotIndex}`);
+    if (!canvas || !img || !img.naturalWidth) return;
+
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  }
+
+  function renderDetectionsForCamera(cameraId, detections) {
+    const slotIndex = SLOT_BY_CAMERA[cameraId];
+    if (slotIndex == null) return;
+
+    const img = document.getElementById(`vid${slotIndex}`);
+    const canvas = document.getElementById(`overlay${slotIndex}`);
+    if (!img || !canvas || !img.naturalWidth) return;
+
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+
+    const ctx = canvas.getContext("2d");
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    const { sx, sy } = getAnnotationScale(cameraId, canvas.width, canvas.height);
+
+    ctx.lineWidth = Math.max(1, Math.min(2, 2 * Math.min(sx, sy)));
+
+    for (const d of detections) {
+      drawBoundingBox(ctx, d, sx, sy);
+    }
+  }
+
+  function renderAllDetections(detections) {
+    for (let i = 0; i < 6; i++) clearOverlay(i);
+
+    const byCamera = new Map();
+    for (const d of detections) {
+      const cam = (d.camera_id || "").toLowerCase().replace(/\s/g, "_");
+      if (!byCamera.has(cam)) byCamera.set(cam, []);
+      byCamera.get(cam).push(d);
+    }
+
+    for (const [cameraId, cameraDetections] of byCamera.entries()) {
+      renderDetectionsForCamera(cameraId, cameraDetections);
+    }
+  }
+
+  const objectRows = new Map();
+
+  function ensureEmptyRemoved(){
+    if (emptyRow) emptyRow.remove();
+  }
+  
+  function getAllLatestDetections() {
+    const all = [];
+    for (const dets of latestDetectionsByCamera.values()) {
+      all.push(...dets);
+    }
+    return all;
+  }
+
+  function upsertObjectRisk(objectName, riskValue){
+    ensureEmptyRemoved();
+
+    const name = String(objectName ?? "").trim() || "unknown";
+    const risk = (riskValue === undefined || riskValue === null) ? "" : String(riskValue);
+
+    let tr = objectRows.get(name);
+    if (!tr){
+      tr = document.createElement("tr");
+      tr.dataset.objectLabel = name;
+
+      tr.addEventListener("mouseenter", () => {
+        hoveredObjectLabel = name;
+        renderAllDetections(getAllLatestDetections());
+      });
+
+      tr.addEventListener("mouseleave", () => {
+        hoveredObjectLabel = null;
+        renderAllDetections(getAllLatestDetections());
+      });
+
+      const tdObj = document.createElement("td");
+      const tdRisk = document.createElement("td");
+      tdObj.textContent = name;
+
+      const pill = document.createElement("span");
+      pill.className = "risk-pill";
+      pill.textContent = risk;
+
+      tdRisk.appendChild(pill);
+      tr.appendChild(tdObj);
+      tr.appendChild(tdRisk);
+
+      objectRows.set(name, tr);
+      objBody.appendChild(tr);
+    } else {
+      const pill = tr.querySelector(".risk-pill");
+      if (pill) pill.textContent = risk;
+      objBody.appendChild(tr);
+    }
+  }
+
+  function clearObjectRiskTable() {
+    objectRows.clear();
+    objBody.innerHTML = "";
+  }
+
+  function confidenceToRisk(confidence) {
+    const c = Number(confidence) || 0;
+
+    if (c >= 0.75) return "high";
+    if (c >= 0.5) return "medium";
+    return "low";
+  }
+
+  function getDetectionLabel(d) {
+    return d.track_id
+      ? `${d.object_class} #${d.track_id}`
+      : (d.object_class || "unknown");
+  }
+
+  function refreshRiskTableFromDetections(detections) {
+    clearObjectRiskTable();
+
+    if (!detections || detections.length === 0) {
+      objBody.innerHTML = `
+        <tr id="emptyRow">
+          <td colspan="2" style="color:#aab1c3;">No detected objects.</td>
+        </tr>
+      `;
+      return;
+    }
+
+    const sorted = detections
+      .map(d => {
+        const conf = Number(d.confidence) || 0;
+        return {
+          ...d,
+          confidence: conf,
+          riskLevel: confidenceToRisk(conf)
+        };
+      })
+      .sort((a, b) => {
+        const order = { high: 1, medium: 2, low: 3 };
+
+        const riskDiff = (order[a.riskLevel] || 999) - (order[b.riskLevel] || 999);
+        if (riskDiff !== 0) return riskDiff;
+
+        return b.confidence - a.confidence;
+      });
+
+    for (const d of sorted) {
+      const label = getDetectionLabel(d);
+      const riskLabel = `${d.riskLevel} (${d.confidence.toFixed(2)})`;
+      upsertObjectRisk(label, riskLabel);
+    }
+  }
+
+  function attachVideoPlaceholder(slotIndex, note){
+    const tile = document.querySelector(`.video-tile[data-slot="${slotIndex}"]`);
+    if (!tile) return;
+    const media = tile.querySelector("img");
+    const ph = tile.querySelector(".placeholder");
+    if (media){
+      media.style.display = "none";
+      media.removeAttribute("src");
+    }
+    if (ph){
+      ph.style.display = "block";
+      ph.textContent = note || "Pending feed.";
+    }
+  }
+
+  function showVideoElement(slotIndex){
+    const tile = document.querySelector(`.video-tile[data-slot="${slotIndex}"]`);
+    if (!tile) return;
+    const media = tile.querySelector("img");
+    const ph = tile.querySelector(".placeholder");
+    if (ph) ph.style.display = "none";
+    if (media) media.style.display = "block";
+  }
+
+  const latestDetectionsByCamera = new Map();
+  function renderBase64Frame(slotIndex, base64Data, mimeType = "image/jpeg"){
+    const img = document.getElementById(`vid${slotIndex}`);
+    if (!img) return;
+
+    img.onload = () => {
+      showVideoElement(slotIndex);
+      const cameraId = CAMERA_BY_SLOT[slotIndex];
+      const dets = latestDetectionsByCamera.get(cameraId) || [];
+      renderDetectionsForCamera(cameraId, dets);
+    };
+
+    img.src = `data:${mimeType};base64,${base64Data}`;
+  }
+  function updateLatestDetections(detections) {
+    latestDetectionsByCamera.clear();
+
+    for (const d of detections) {
+      const cam = (d.camera_id || "").toLowerCase().replace(/\s/g, "_");
+      if (!latestDetectionsByCamera.has(cam)) latestDetectionsByCamera.set(cam, []);
+      latestDetectionsByCamera.get(cam).push(d);
+    }
+
+    renderAllDetections(detections);
+  }
+
+  function setFeedLabel(slotIndex, label){
+    const el = document.getElementById(`label${slotIndex}`);
+    if (el) el.textContent = label;
+  }
+
+  function renderDemoFrame(slotIndex, dataUrl) {
+    const img = document.getElementById(`vid${slotIndex}`);
+    if (!img) return;
+    img.src = dataUrl;
+    showVideoElement(slotIndex);
+  }
+
+  async function loadGifFromTxt(slotIndex, path) {
+    try {
+      const res = await fetch(path, { cache: "no-store" });
+      let base64 = await res.text();
+
+      base64 = base64.replace(/\s+/g, "");
+
+      const img = document.getElementById(`vid${slotIndex}`);
+      if (!img) {
+        console.error(`No img found for slot ${slotIndex}`);
+        return;
+      }
+
+      img.onload = () => {
+        console.log(`GIF loaded into slot ${slotIndex}`);
+        showVideoElement(slotIndex);
+      };
+
+      img.onerror = () => {
+        console.error(`Failed to decode GIF in slot ${slotIndex}`);
+        attachVideoPlaceholder(slotIndex, "GIF failed to load");
+      };
+
+      if (base64.startsWith("data:")) {
+        img.src = base64;
+      } else {
+        img.src = `data:image/gif;base64,${base64}`;
+      }
+    } catch (err) {
+      console.error("Failed to load demo.txt:", err);
+    }
+  }
+
+  const demoFrames = [
+    "data:image/svg+xml;base64," + btoa(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="376" height="211">
+        <rect width="100%" height="100%" fill="#111"/>
+        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Feed 1</text>
+        <text x="50%" y="60%" fill="#7ee787" font-size="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">professional demo frame</text>
+      </svg>
+    `),
+    "data:image/svg+xml;base64," + btoa(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="376" height="211">
+        <rect width="100%" height="100%" fill="#1b1f2a"/>
+        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Feed 2</text>
+        <text x="50%" y="60%" fill="#ffcc66" font-size="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">professional demo frame</text>
+      </svg>
+    `),
+    "data:image/svg+xml;base64," + btoa(`
+      <svg xmlns="http://www.w3.org/2000/svg" width="376" height="211">
+        <rect width="100%" height="100%" fill="#202830"/>
+        <text x="50%" y="45%" fill="white" font-size="28" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">Feed 3</text>
+        <text x="50%" y="60%" fill="#79c0ff" font-size="16" text-anchor="middle" font-family="Arial, Helvetica, sans-serif">professional demo frame</text>
+      </svg>
+    `)
+  ];
+
+  async function fetchFrameAsDataUrl(path) {
+    const res = await fetch(path, { cache: "no-store" });
+    const blob = await res.blob();
+
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result); // full base64 data URL
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function preloadFrames(maxFrames = 500) {
+    const frames = [];
+
+    for (let i = 1; i <= maxFrames; i++) {
+      const path = `./frames/frame_${String(i).padStart(4, "0")}.jpg`;
+
+      try {
+        const dataUrl = await fetchFrameAsDataUrl(path);
+        frames.push(dataUrl);
+      } catch {
+        break;
+      }
+    }
+
+    console.log(`Loaded ${frames.length} frames`);
+    return frames;
+  }
+
+  function playFrames(slotIndex, frames, fps = 12) {
+    if (!frames.length) {
+      attachVideoPlaceholder(slotIndex, "No frames found");
+      return;
+    }
+
+    const img = document.getElementById(`vid${slotIndex}`);
+    if (!img) return;
+
+    if (demoFrameTimer) {
+      clearInterval(demoFrameTimer);
+      demoFrameTimer = null;
+    }
+
+    let i = 0;
+
+    img.src = frames[0];
+    showVideoElement(slotIndex);
+
+    demoFrameTimer = setInterval(() => {
+      if (isPaused) return;
+
+      i = (i + 1) % frames.length;
+      img.src = frames[i];
+    }, Math.round(1000 / fps));
+  }
+
+  async function runLocalDemo() {
+    wsDot.classList.add("connected");
+    wsStatus.textContent = "demo mode";
+    feedDot.classList.add("connected");
+    feedStatus.textContent = "demo mode";
+
+    const frames = await preloadFrames();
+    playFrames(1, frames, 12);
+
+    for (let i = 0; i < 6; i++) {
+      if (i === 1) continue;
+      renderDemoFrame(i, demoFrames[i % demoFrames.length]);
+    }
+
+    upsertObjectRisk("truck", "high");
+  }
+
+  setFeedLabel(0, "front_left");
+  setFeedLabel(1, "front");
+  setFeedLabel(2, "front_right");
+  setFeedLabel(3, "back_left");
+  setFeedLabel(4, "back");
+  setFeedLabel(5, "back_right");
+
+  const SAMPLE_JSON_PATH = "./CAM_FRONT_sample.json";
+  const PLAYBACK_INTERVAL_MS = 150;
+
+  let isPaused = false;
+  let demoFrameTimer = null;
+  let samplePlaybackTimer = null;
+  let hoveredObjectLabel = null;
+
+  // Debug!!! Spacebar toggle
+  window.addEventListener("keydown", (e) => {
+    const tag = (e.target?.tagName || "").toLowerCase();
+    if (tag === "input" || tag === "textarea" || e.target?.isContentEditable) return;
+
+    if (e.code === "Space") {
+      e.preventDefault();
+      isPaused = !isPaused;
+
+      wsStatus.textContent = isPaused ? "paused" : (DEMO_MODE ? "demo mode" : "connected");
+      feedStatus.textContent = isPaused ? "paused" : (DEMO_MODE ? "demo mode" : "connected");
+    }
+  });
+
+  async function startSamplePlayback() {
+    try {
+      const res = await fetch(SAMPLE_JSON_PATH, { cache: "no-store" });
+      const frames = await res.json();
+
+      if (!Array.isArray(frames) || !frames.length) {
+        console.error("No playback frames found in sample JSON");
+        return;
+      }
+
+      if (samplePlaybackTimer) {
+        clearInterval(samplePlaybackTimer);
+        samplePlaybackTimer = null;
+      }
+
+      let idx = 0;
+
+      samplePlaybackTimer = setInterval(() => {
+        if (isPaused) return;
+
+        const frame = frames[idx];
+        const dets = frameToDetections(frame);
+
+        updateLatestDetections(dets);
+        refreshRiskTableFromDetections(dets);
+
+        idx = (idx + 1) % frames.length;
+      }, PLAYBACK_INTERVAL_MS);
+    } catch (err) {
+      console.error("Failed to start sample playback:", err);
+    }
+  }
+
+  if (DEMO_MODE) {
+    runLocalDemo();
+    startSamplePlayback(); 
+  } else {
+    let feedWS;
+    try{
+      feedWS = new WebSocket(FEED_WS_URL);
+
+      feedWS.onopen = () => {
+        feedDot.classList.add("connected");
+        feedStatus.textContent = "connected";
+      };
+      feedWS.onclose = () => {
+        feedDot.classList.remove("connected");
+        feedStatus.textContent = "disconnected";
+      };
+      feedWS.onerror = () => {
+        console.warn("feed websocket error");
+      };
+
+      feedWS.onmessage = (evt) => {
+        let data = evt.data;
+
+        try {
+          data = JSON.parse(data);
+        } catch {
+          const s = String(data);
+          const parts = s.split("|");
+          if (parts.length >= 2) upsertObjectRisk(parts[0], parts.slice(1).join("|"));
+          return;
+        }
+
+        let items = [];
+        if (Array.isArray(data)) {
+          items = data;
+        } else if (Array.isArray(data.objects)) {
+          items = data.objects;
+        } else {
+          items = [data];
+        }
+
+        for (const item of items) {
+          const obj = item.object ?? item.name ?? item.label ?? item.class ?? "unknown";
+          const risk = item.risk ?? item.score ?? item.confidence ?? "";
+          upsertObjectRisk(obj, risk);
+        }
+      };
+    } catch(e){
+      feedStatus.textContent = "failed";
+    }
+
+    let videoWS;
+    try{
+      videoWS = new WebSocket(VIDEO_WS_URL);
+      videoWS.binaryType = "arraybuffer";
+
+      videoWS.onopen = () => {
+        wsDot.classList.add("connected");
+        wsStatus.textContent = "connected";
+      };
+
+      videoWS.onclose = () => {
+        wsDot.classList.remove("connected");
+        wsStatus.textContent = "disconnected";
+        for (let i=0;i<6;i++) attachVideoPlaceholder(i, "Pending feed.");
+      };
+
+      videoWS.onerror = () => console.warn("video websocket error");
+
+      videoWS.onmessage = (evt) => {
+        if (typeof evt.data !== "string") return;
+
+        let msg;
+        try {
+          msg = JSON.parse(evt.data);
+        } catch {
+          return;
+        }
+
+        if (!msg) return;
+
+        if (Number.isInteger(msg.slot)) {
+          if (msg.label) setFeedLabel(msg.slot, msg.label);
+
+          if (msg.state === "ready") {
+            showVideoElement(msg.slot);
+          }
+
+          if (msg.state === "pending") {
+            attachVideoPlaceholder(msg.slot, "Pending feed.");
+          }
+
+          if (msg.frame) {
+            renderBase64Frame(
+              msg.slot,
+              msg.frame,
+              msg.mimeType || "image/jpeg"
+            );
+          }
+        }
+      };
+    } catch(e){
+      wsStatus.textContent = "failed";
+    }
+  }
+</script>
+</body>
+</html>
