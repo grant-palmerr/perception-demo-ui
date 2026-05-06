@@ -13,50 +13,11 @@ function getHttpBaseUrl() {
     .replace(/\/[^/]+$/, "");
 }
 
-// ?playback=1 loads this file; needs a real http server or fetch breaks
-const SAMPLE_JSON_PATH = "CAM_FRONT_sample.json";
-const PLAYBACK_INTERVAL_MS = 150;
-
-function getPlaybackModeFromUrl() {
-  const p = new URLSearchParams(window.location.search).get("playback");
-  return p === "1" || p === "true" || p === "yes";
-}
-
-const IS_PLAYBACK_MODE = getPlaybackModeFromUrl();
-
 // maps class ids to strings — pull from tracking_pipeline.py on the board when we know the real list
 const CLASS_NAMES = [
   "car", "truck", "trailer", "bus", "construction_vehicle",
   "bicycle", "motorcycle", "pedestrian", "traffic_cone", "barrier"
 ];
-
-// used when you're in playback mode (no socket)
-const playbackState = {
-  frames: null,
-  totalFrames: 0,
-  frameIndex: 0,
-  timerId: null,
-  frameLabel: "—"
-};
-
-// placeholder pics for now — the old azure links from email 404'd lol
-const CAMERA_IMAGES = {
-  front: "https://placehold.co/640x480/2a2a32/b8b8c8?text=front",
-  front_left: "https://placehold.co/640x480/2a2a32/b8b8c8?text=front_left",
-  front_right: "https://placehold.co/640x480/2a2a32/b8b8c8?text=front_right",
-  back: "https://placehold.co/640x480/2a2a32/b8b8c8?text=back",
-  back_left: "https://placehold.co/640x480/2a2a32/b8b8c8?text=back_left",
-  back_right: "https://placehold.co/640x480/2a2a32/b8b8c8?text=back_right"
-};
-
-// json boxes are in "full cam" pixels (nuScenes front = 1600x900). we squish them down to match whatever img we're showing.
-// liveImageSizes is populated from metadata.image_width/height when the backend sends real frames.
-const ANNOTATION_SIZE_BY_CAMERA = {
-  front: { w: 1600, h: 900 }
-};
-
-// per-camera sizes received live from the backend (overrides the static table above)
-const liveImageSizes = {};
 
 // decoded ImageBitmaps per camera — populated async via createImageBitmap
 const liveBitmaps = {};
@@ -127,9 +88,6 @@ frameWorker.onmessage = (e) => {
       if (liveBitmaps[cameraId]) liveBitmaps[cameraId].close();
       liveBitmaps[cameraId] = bitmap;
     }
-    if (meta.image_width && meta.image_height) {
-      liveImageSizes[cameraId] = { w: meta.image_width, h: meta.image_height };
-    }
     latestDetectionsByCamera.set(cameraId, detections);
     updateTrackTable(cameraId, detections);
     appState.lastMessage = detections;
@@ -148,15 +106,6 @@ frameWorker.onmessage = (e) => {
     console.error("Worker:", msg.message);
   }
 };
-
-// how much to scale x and y so boxes line up with the image
-function getAnnotationScale(cameraId, canvasW, canvasH) {
-  const ref = liveImageSizes[cameraId] || ANNOTATION_SIZE_BY_CAMERA[cameraId];
-  if (!ref || !ref.w || !ref.h || ref.w <= 0 || ref.h <= 0) {
-    return { sx: 1, sy: 1 };
-  }
-  return { sx: canvasW / ref.w, sy: canvasH / ref.h };
-}
 
 // track_id → { detection, cameraId, disappearedAt, missedFrames }
 // disappearedAt is null while the track is active; set to Date.now() when it vanishes.
@@ -349,7 +298,7 @@ const appState = {
   hoveredTrackId: null,
   lockedTrackId: null,
   sequenceIdx: null,
-  sequenceState: "idle"  // "idle" | "playing" | "ended" | "done"
+  sequenceState: "idle"  // "idle" | "playing" | "ended"
 };
 
 // latest detections per camera — used to redraw a single camera slot on hover change
@@ -383,53 +332,6 @@ function cameraIdFromMetadata(camera) {
     BACK_RIGHT: "back_right"
   };
   return map[key] || "front";
-}
-
-// turns one json frame into the shape renderViewer already likes
-function frameToDetections(frame) {
-  const meta = frame && frame.metadata ? frame.metadata : {};
-  const cam = cameraIdFromMetadata(frame.cam_id || meta.camera);
-  const tracks = frame && frame.tracks ? frame.tracks : {};
-  const out = [];
-
-  for (const [trackId, track] of Object.entries(tracks)) {
-    let x1, y1, x2, y2, conf, classId, anomalyScore, isAnomaly;
-
-    if (Array.isArray(track)) {
-      if (track.length < 6) continue;
-      [x1, y1, x2, y2, conf, classId] = track;
-      anomalyScore = track.length >= 7 ? Number(track[6]) : null;
-      isAnomaly = track.length >= 8 ? !!track[7] : (anomalyScore != null && anomalyScore > 0.5);
-    } else if (track && typeof track === "object") {
-      const bbox = track.bbox;
-      if (!Array.isArray(bbox) || bbox.length < 4) continue;
-      [x1, y1, x2, y2] = bbox;
-      conf = Number(track.score ?? 0);
-      classId = Math.floor(Number(track.class_id ?? 0));
-      anomalyScore = track.anomaly_score != null ? Number(track.anomaly_score) : null;
-      isAnomaly = anomalyScore != null && anomalyScore > 0.5;
-    } else {
-      continue;
-    }
-
-    const objectClass = CLASS_NAMES[classId] ?? `class_${classId}`;
-
-    out.push({
-      camera_id: cam,
-      object_class: objectClass,
-      bounding_box: [
-        [x1, y1],
-        [x2, y1],
-        [x2, y2],
-        [x1, y2]
-      ],
-      track_id: trackId,
-      confidence: conf,
-      anomaly_score: anomalyScore,
-      is_anomaly: isAnomaly
-    });
-  }
-  return out;
 }
 
 const CLASS_COLORS = {
@@ -556,35 +458,6 @@ function renderViewer(message) {
         for (const d of grace) drawBoundingBox(ctx, d, 1, 1);
         ctx.globalAlpha = 1;
       }
-      return;
-    }
-
-    // fallback: placeholder img + canvas overlay (playback / no live image yet)
-    if (!img || !CAMERA_IMAGES[cameraId]) return;
-
-    const drawBoxes = () => {
-      if (!img.naturalWidth) return;
-      if (cameraDetections.length > 0) showCameraSlot(cameraId);
-      if (canvas.width !== img.naturalWidth || canvas.height !== img.naturalHeight) {
-        canvas.width = img.naturalWidth;
-        canvas.height = img.naturalHeight;
-      }
-      // draw image onto canvas (same approach as the live bitmap path)
-      const ctx = canvas.getContext("2d");
-      ctx.drawImage(img, 0, 0);
-      if (cameraDetections.length > 0) {
-        const { sx, sy } = getAnnotationScale(cameraId, canvas.width, canvas.height);
-        ctx.lineWidth = Math.max(1, Math.min(2, 2 * Math.min(sx, sy)));
-        for (const d of cameraDetections) drawBoundingBox(ctx, d, sx, sy);
-      }
-    };
-
-    const targetUrl = CAMERA_IMAGES[cameraId];
-    if (img.src !== targetUrl) {
-      img.src = targetUrl;
-      img.onload = drawBoxes;
-    } else if (img.complete) {
-      drawBoxes();
     }
   });
 }
@@ -592,29 +465,16 @@ function renderViewer(message) {
 function updateStatusUI() {
   if (!wsDot || !wsLabel) return;
 
-  const status = IS_PLAYBACK_MODE
-    ? (appState.connectionStatus === "playback" ? "playback" : appState.connectionStatus)
-    : appState.connectionStatus;
+  wsDot.dataset.status = appState.connectionStatus;
 
-  wsDot.dataset.status = status;
-
-  if (IS_PLAYBACK_MODE) {
-    const labels = {
-      connecting: "loading…",
-      playback: `playback — frame ${playbackState.frameLabel}`,
-      error: "playback failed"
-    };
-    wsLabel.textContent = labels[appState.connectionStatus] ?? appState.connectionStatus;
-  } else {
-    const labels = {
-      disconnected: "disconnected",
-      connecting: "connecting…",
-      connected: "connected",
-      error: "connection error",
-      "playback-done": "playback complete"
-    };
-    wsLabel.textContent = labels[appState.connectionStatus] ?? appState.connectionStatus;
-  }
+  const labels = {
+    disconnected: "disconnected",
+    connecting: "connecting…",
+    connected: "connected",
+    error: "connection error",
+    done: "stream complete"
+  };
+  wsLabel.textContent = labels[appState.connectionStatus] ?? appState.connectionStatus;
 }
 
 let activeSocket = null;
@@ -646,7 +506,6 @@ async function pollHealth() {
 }
 
 function startHealthPolling() {
-  if (IS_PLAYBACK_MODE) return;
   stopHealthPolling();
   pollHealth();
   healthPollTimer = setInterval(pollHealth, 5000);
@@ -697,22 +556,6 @@ function handleLifecycleSignal(msg) {
     appState.sequenceState = "ended";
     clearTimeout(seqBannerAutoHideTimer);
     showSeqBanner(`Sequence ${msg.seq_idx} ended`, "end");
-
-  } else if (msg.status === "done") {
-    appState.sequenceState = "done";
-    appState.connectionStatus = "playback-done";
-    wsDot.dataset.status = "playback";
-    updateStatusUI();
-    clearTimeout(seqBannerAutoHideTimer);
-    showSeqBanner("Playback complete — reconnect to replay", "done");
-    const reconnectBtn = document.createElement("button");
-    reconnectBtn.className = "seq-reconnect-btn";
-    reconnectBtn.textContent = "Reconnect";
-    reconnectBtn.addEventListener("click", () => {
-      hideSeqBanner();
-      connectWebSocket();
-    });
-    if (seqBanner) seqBanner.appendChild(reconnectBtn);
   }
 }
 
@@ -787,68 +630,10 @@ function connectWebSocket() {
 
   ws.onclose = () => {
     stopHealthPolling();
-    if (appState.connectionStatus !== "playback-done") {
-      appState.connectionStatus = "disconnected";
-      updateStatusUI();
-    }
+    appState.connectionStatus = "disconnected";
+    updateStatusUI();
     console.log("WebSocket closed");
   };
-}
-
-// next frame in playback mode
-function playbackTick() {
-  const frames = playbackState.frames;
-  if (!frames || frames.length === 0) return;
-
-  const i = playbackState.frameIndex;
-  const frame = frames[i];
-  playbackState.frameLabel = `${i + 1} / ${playbackState.totalFrames}`;
-
-  const dets = frameToDetections(frame);
-  const cameraId = dets.length > 0 ? dets[0].camera_id : null;
-  if (cameraId) {
-    latestDetectionsByCamera.set(cameraId, dets);
-    updateTrackTable(cameraId, dets);
-  }
-  appState.lastMessage = dets;
-  appState.lastMessageReceivedAt = Date.now();
-  appState.messageCount += 1;
-  updateStatusUI();
-  renderViewer(dets);
-
-  playbackState.frameIndex = (i + 1) % playbackState.totalFrames;
-}
-
-// fake a "live" stream by reading the sample file and stepping frames on a timer
-async function startSamplePlayback() {
-  appState.connectionStatus = "connecting";
-  appState.messageCount = 0;
-  updateStatusUI();
-
-  try {
-    const res = await fetch(SAMPLE_JSON_PATH);
-    if (!res.ok) {
-      throw new Error("HTTP " + res.status + " " + res.statusText);
-    }
-    const frames = await res.json();
-    if (!Array.isArray(frames) || frames.length === 0) {
-      throw new Error("Expected non-empty JSON array of frames");
-    }
-
-    playbackState.frames = frames;
-    playbackState.totalFrames = frames.length;
-    playbackState.frameIndex = 0;
-
-    appState.connectionStatus = "playback";
-    appState.messageCount = 0;
-
-    playbackTick();
-    playbackState.timerId = window.setInterval(playbackTick, PLAYBACK_INTERVAL_MS);
-  } catch (err) {
-    console.error("Sample playback:", err);
-    appState.connectionStatus = "error";
-    updateStatusUI();
-  }
 }
 
 // "All" + per-class visibility checkboxes
@@ -923,14 +708,7 @@ setupClassFilters();
 function setupWsUrlInput() {
   const input = document.getElementById("ws-url-input");
   const btn = document.getElementById("ws-connect-btn");
-  const group = document.getElementById("ws-url-group");
   if (!input || !btn) return;
-
-  // hide the control in playback mode — it's irrelevant there
-  if (IS_PLAYBACK_MODE && group) {
-    group.style.display = "none";
-    return;
-  }
 
   input.value = getWebSocketUrl();
 
@@ -1207,18 +985,13 @@ setupConfigPanel();
 
 // ── Startup ───────────────────────────────────────────────────────────────────
 
-// url decides which path we use
-if (IS_PLAYBACK_MODE) {
-  startSamplePlayback();
-} else {
-  // silently load config to initialize the camera grid before first live frame
-  fetch(getHttpBaseUrl() + "/config")
-    .then(r => r.ok ? r.json() : null)
-    .then(cfg => {
-      if (!cfg) return;
-      if (cfg.cameras) handleCameraListChange(cfg.cameras);
-      if (cfg.sort_max_age) configSortMaxAge = cfg.sort_max_age;
-    })
-    .catch(() => {});
-  connectWebSocket();
-}
+// silently load config to initialize the camera grid before first live frame
+fetch(getHttpBaseUrl() + "/config")
+  .then(r => r.ok ? r.json() : null)
+  .then(cfg => {
+    if (!cfg) return;
+    if (cfg.cameras) handleCameraListChange(cfg.cameras);
+    if (cfg.sort_max_age) configSortMaxAge = cfg.sort_max_age;
+  })
+  .catch(() => {});
+connectWebSocket();
